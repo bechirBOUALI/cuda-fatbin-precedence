@@ -188,3 +188,29 @@ read the magic, `headerSize`, and `fatSize`, then jump by `headerSize + fatSize`
 - Untested conflict cases from the plan: entry-header architecture disagreeing
   with the embedded ELF's `e_flags`, a payload hidden in `padded_payload_size`
   slack, and an entry positioned past the declared `fatbin_size`.
+
+## Addendum: the positional rule reverses for PTX
+
+Measured 2026-09-11, driver 597.06, same method as above.
+
+Two PTX entries at the same architecture: the **last** in file order executes.
+This is the opposite of two ELF entries, where the first wins.
+
+| Container | Entry order | Executed |
+|---|---|---|
+| ELF + ELF | variant_a, variant_b | variant_a (first) |
+| ELF + ELF | variant_b, variant_a | variant_b (first) |
+| PTX + PTX | variant_a, variant_b | variant_b (last) |
+| PTX + PTX | variant_b, variant_a | variant_a (last) |
+
+Both directions were tested for both kinds, from the same source kernels, with
+`CUDA_CACHE_DISABLE=1` throughout, so the reversal is not an artefact of build
+order or caching.
+
+The consequence for static analysis is worse than a single undocumented rule.
+There is no one positional convention to implement: a tool that picks the first
+matching entry is correct for cubins and incorrect for PTX, and vice versa.
+
+A related observation, measured less exhaustively: with two PTX entries at
+*different* architectures, the higher architecture won regardless of order
+(compute_75 against compute_89, both orders). Only that one pair was tested.

@@ -13,6 +13,20 @@ and provides the tools used.
 **Between two ELF entries for the same architecture, the first in file order
 wins.** Swapping the order swaps the winner, so selection is positional.
 
+**Between two PTX entries for the same architecture, the *last* in file order
+wins.** The direction of the positional rule is not a property of the container
+but of the entry kind, and it reverses between the two most common kinds:
+
+| Container | Order | Executed |
+|---|---|---|
+| ELF + ELF | a, b | **a** (first) |
+| ELF + ELF | b, a | **b** (first) |
+| PTX + PTX | a, b | **b** (last) |
+| PTX + PTX | b, a | **a** (last) |
+
+Anyone modelling "which entry is live" therefore cannot use a single positional
+rule. A tool that assumes first-wins is right for cubins and wrong for PTX.
+
 **Between a PTX entry and an ELF entry for the same architecture, the ELF wins
 regardless of position.** Entry kind outranks order.
 
