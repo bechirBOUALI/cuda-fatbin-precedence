@@ -1,0 +1,190 @@
+# Step 1 — Fatbin entry precedence
+
+Measured 2026-09-10. Which entry does the CUDA driver execute when a fatbin
+contains more than one entry matching the running GPU?
+
+## Test environment
+
+| | |
+|---|---|
+| GPU | NVIDIA RTX 2000 Ada Generation Laptop, compute capability 8.9 |
+| Driver | 595.71 (Windows host, reached through the WSL2 stub) |
+| Toolkit | CUDA 13.2, nvcc V13.2.86 |
+| Host | Ubuntu 22.04 on WSL2 |
+
+Every run had `CUDA_CACHE_DISABLE=1` set, so a cached JIT result cannot be
+mistaken for a fresh selection decision.
+
+## Method
+
+Two kernels, `variant_a` and `variant_b`, export the **same** symbol `probe`
+and differ only in the marker they write, 0xAAAA and 0xBBBB. Because the symbol
+is identical, `cuModuleGetFunction` succeeds either way and the marker returned
+identifies which entry the driver chose.
+
+`fatbinary` combines them into images holding two entries that both match
+sm_89. It accepts duplicate architectures without complaint and preserves the
+order given on the command line; the paired images below differ only in that
+order.
+
+The harness (`src/harness/loader.cpp`) loads an image, launches `probe` on four
+threads, and reports the marker. The output buffer is pre-filled with 0xDEAD so
+that a kernel which never ran identifies itself rather than returning a
+plausible zero.
+
+## Results
+
+Controls first. Single-entry images returned their own marker, confirming the
+harness reports what actually executed.
+
+| Image | Entries (in order) | Executed |
+|---|---|---|
+| `variant_a.cubin` | ELF A | variant_a |
+| `variant_b.cubin` | ELF B | variant_b |
+| `elf_ab.fatbin` | ELF A, ELF B | **variant_a** |
+| `elf_ba.fatbin` | ELF B, ELF A | **variant_b** |
+| `ptxa_elfb.fatbin` | PTX A, ELF B | **variant_b** |
+| `elfb_ptxa.fatbin` | ELF B, PTX A | **variant_b** |
+
+`cuModuleLoadData` and `cuModuleLoadFatBinary` produced identical results on
+all four conflict images. No divergence between those two entry points.
+
+## Precedence rules
+
+Two different rules, depending on what is in conflict.
+
+1. **ELF against ELF, same architecture: first entry wins.** Swapping the order
+   swaps the winner, so selection is positional.
+2. **PTX against ELF, same architecture: ELF wins regardless of position.**
+   Entry kind outranks order.
+
+## Finding: the PTX entry is unreachable, and says so nowhere
+
+For `ptxa_elfb.fatbin`, `cuobjdump -lelf -lptx` reports both entries. The PTX
+entry contains:
+
+```
+mov.u32 %r2, 43690      // 0xAAAA — variant_a
+```
+
+The GPU executed 0xBBBB. The PTX describes code that never runs.
+
+Nothing in the PTX marks it as dead. Distinguishing a live entry from a dead
+one requires applying the driver's precedence rule, and that rule is not
+documented. Any analysis that reads the PTX — the tempting choice, since PTX is
+text while the alternative needs disassembly — is describing code the hardware
+never executes.
+
+To be precise about scope: `cuobjdump` is not wrong here, it lists both
+entries. The gap appears in any tool or process that picks one representation
+to inspect, hash, or attest, without reproducing the driver's selection logic.
+
+## Second-order result: the live entry is environment-dependent
+
+With `CUDA_FORCE_PTX_JIT=1`, `ptxa_elfb.fatbin` executes variant_a instead of
+variant_b. The same bytes run different code depending on an environment
+variable, so an analysis sandbox and a production host can disagree about what
+a fatbin does, without either being misconfigured.
+
+## Reproduction
+
+```sh
+make -C src/kernels          # cubins, ptx, and the four conflict fatbins
+make -C src/harness          # the loader
+cd build
+export CUDA_CACHE_DISABLE=1
+./loader elf_ab.fatbin
+./loader ptxa_elfb.fatbin
+./loader ptxa_elfb.fatbin --fatbinary
+CUDA_FORCE_PTX_JIT=1 ./loader ptxa_elfb.fatbin
+```
+
+Artifact hashes, first 16 hex characters of SHA-256:
+
+```
+69e6171ebbd6b307  variant_a.cubin
+765aa92f36ab096e  variant_b.cubin
+bd02782646db8e9b  variant_a.ptx
+a3b7a73f1338e6be  elf_ab.fatbin
+407a21b506db18c8  elf_ba.fatbin
+e636fbda03be6334  ptxa_elfb.fatbin
+f5495b8f44cbfd5e  elfb_ptxa.fatbin
+```
+
+## Confirmed: order is positional, and the container has no integrity metadata
+
+`elf_ab.fatbin` and `elf_ba.fatbin` differ in exactly four bytes, at two
+positions:
+
+```
+0x0714:  AA AA  ->  BB BB      (first payload's marker)
+0x137C:  BB BB  ->  AA AA      (second payload's marker)
+```
+
+Both sit inside an identical SASS immediate encoding, `02 78 05 00 [marker]
+00 00 00 0f`.
+
+Two conclusions.
+
+**`fatbinary` preserves command-line order rather than sorting.** Had it sorted
+entries into a canonical order, both files would place the same variant first
+and be byte-identical. The driver's choice tracks which payload sits first in
+the file, so selection between two ELF entries is positional.
+
+**The container carries no per-entry integrity metadata.** Every byte outside
+those two markers is identical, container and entry headers included. A
+per-entry hash, checksum, or content identifier would have swapped along with
+the payloads and shown up in this diff. None did. A payload can therefore be
+substituted without anything at the container level detecting it, which is the
+mechanism the rest of this work depends on.
+
+Incidental measurement for the parser: the two markers are 3176 bytes apart and
+each cubin is 3112 bytes, leaving 64 bytes of container per entry. A lead to
+check entry-header layout against, not yet a conclusion, since padding could
+account for part of it.
+
+## Resolved: ordinary builds do NOT ship duplicate entries
+
+A default `nvcc -arch=sm_89` build makes `cuobjdump` list two sm_89 ELF images,
+which raised the question of whether duplicate same-architecture entries appear
+in ordinary compiler output. They do not. Walking the container headers in
+`.nv_fatbin` gives:
+
+| Artifact | Section | Fatbins | Wrappers | Fat sizes |
+|---|---|---|---|---|
+| object, kernel only | 3504 B | 1 | 1 | 3488 |
+| object, kernel + main | 3504 B | 1 | 1 | 3488 |
+| linked executable | 5040 B | **2** | **2** | 1520, 3488 |
+
+The two images live in **two separate fatbins**, each with its own registration
+wrapper in `.nvFatBinSegment`, not as duplicate entries inside one container.
+
+Linking is what adds the second one. Both object files carry a single 3488-byte
+fatbin; the executable carries that same fatbin plus a new 1520-byte one, which
+is the device-link stub the device linker emits. The header walk consumes the
+section exactly, 16 + 1520 + 16 + 3488 = 5040 bytes, with nothing left over.
+
+This is a negative result: the conflict cases in this document still have to be
+constructed deliberately. They are not a naturally occurring hazard.
+
+One related observation does survive. `cuobjdump -lelf` flattens both containers
+into a single numbered list and labels both `sm_89`, with nothing indicating
+they came from different fatbins. A tool consuming that output cannot recover
+container boundaries, which is a smaller instance of the same
+scanner-versus-driver gap this document is about.
+
+### Method note
+
+`grep` on this machine resolves to `ugrep`, which does not match raw byte
+patterns passed as `$'\x50\xed\x55\xba'`, and silently reports zero hits even
+when the magic is at offset 0. Counting magics by piping to `grep -c` is also
+wrong regardless of implementation, since it counts matching *lines* and binary
+data puts many magics on one line. Walk the headers with a real parser instead:
+read the magic, `headerSize`, and `fatSize`, then jump by `headerSize + fatSize`.
+
+## Open questions
+
+- Only two entries tested. Does the rule hold at three or more?
+- Untested conflict cases from the plan: entry-header architecture disagreeing
+  with the embedded ELF's `e_flags`, a payload hidden in `padded_payload_size`
+  slack, and an entry positioned past the declared `fatbin_size`.

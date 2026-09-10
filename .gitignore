@@ -1,0 +1,7 @@
+build/
+*.o
+*.cubin
+*.ptx
+*.fatbin
+loader
+leaktest
