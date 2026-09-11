@@ -214,3 +214,37 @@ matching entry is correct for cubins and incorrect for PTX, and vice versa.
 A related observation, measured less exhaustively: with two PTX entries at
 *different* architectures, the higher architecture won regardless of order
 (compute_75 against compute_89, both orders). Only that one pair was tested.
+
+## Addendum 2: the full hierarchy, and a flag bit that hides an entry
+
+Measured 2026-09-11, driver 597.06. These correct and extend the addendum above.
+
+### Selection is three levels, not one
+
+| Level | Rule | Evidence |
+|---|---|---|
+| 1. kind | ELF beats PTX | sm_86 ELF beats compute_89 PTX, both orders |
+| 2. architecture | nearest compatible wins, order-independent | sm_89 ELF beats sm_86 ELF, both orders |
+| 3. file order | ELF: first wins. PTX: last wins | both directions tested per kind |
+
+An sm_86 cubin loads and runs on its own on this sm_89 GPU, so it is a real
+candidate rather than an invalid entry that is simply skipped. The earlier
+statement that "selection is positional" was too strong: position only decides
+ties at the bottom of the hierarchy.
+
+### A flag bit removes an entry from selection invisibly
+
+A single valid sm_89 cubin in a self-consistent container, with one bit of the
+entry `flags` field (entry+0x28) changed:
+
+| flags | Driver | cuobjdump |
+|---|---|---|
+| 0x11 (baseline) | executes | disassembles fully |
+| bit 20 set | `CUDA_ERROR_NO_BINARY_FOR_GPU` | disassembles fully |
+| bit 21 set | `CUDA_ERROR_NO_BINARY_FOR_GPU` | disassembles fully |
+| bit 24 set | executes | disassembles fully |
+
+Bits 20 and 21 remove the entry from the driver's candidate set. Bit 24 does
+not. Every size and offset in the file remains correct, so no parser has any
+structural reason to object, and the disassembler happily prints the SASS of
+code the GPU will never run.

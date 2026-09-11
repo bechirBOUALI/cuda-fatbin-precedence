@@ -10,22 +10,29 @@ and provides the tools used.
 
 ## Findings
 
-**Between two ELF entries for the same architecture, the first in file order
-wins.** Swapping the order swaps the winner, so selection is positional.
+Selection is a **three-level hierarchy**, not a single rule. Each level is only
+consulted when the one above it ties.
 
-**Between two PTX entries for the same architecture, the *last* in file order
-wins.** The direction of the positional rule is not a property of the container
-but of the entry kind, and it reverses between the two most common kinds:
+**1. Entry kind decides first.** An ELF beats a PTX entry even when the PTX is an
+exact architecture match and the ELF is not. An sm_86 cubin beats a compute_89
+PTX on an sm_89 GPU, in either file order.
 
-| Container | Order | Executed |
-|---|---|---|
-| ELF + ELF | a, b | **a** (first) |
-| ELF + ELF | b, a | **b** (first) |
-| PTX + PTX | a, b | **b** (last) |
-| PTX + PTX | b, a | **a** (last) |
+**2. Then architecture proximity.** Among entries of the same kind, the nearest
+compatible architecture wins **regardless of file order**. An sm_89 cubin beats
+an sm_86 cubin whichever comes first, and the sm_86 cubin runs perfectly well on
+its own, so it is a genuine candidate rather than an invalid one.
 
-Anyone modelling "which entry is live" therefore cannot use a single positional
-rule. A tool that assumes first-wins is right for cubins and wrong for PTX.
+**3. Only then file order**, and its direction depends on the kind:
+
+| Same kind, same architecture | Winner |
+|---|---|
+| ELF + ELF | **first** in file order |
+| PTX + PTX | **last** in file order |
+
+The practical consequence is sharper than "there is an undocumented rule".
+A tool that implements "first matching entry wins" is wrong three ways: whenever
+entries differ in kind, whenever they differ in architecture, and whenever they
+are PTX. File order is a tie-break at the bottom of the hierarchy, not the rule.
 
 **Between a PTX entry and an ELF entry for the same architecture, the ELF wins
 regardless of position.** Entry kind outranks order.
@@ -44,6 +51,20 @@ disagree about what a fat binary does without either being misconfigured.
 **Entry kinds identified by construction:** 1 = PTX, 2 = ELF/cubin, 8 = LTO IR,
 0x40 = relocatable PTX. Kinds 0x10, 0x20 and 0x80 remain unidentified; 0x100 is
 a group/index entry that NVIDIA's own header says cannot currently be created.
+
+**A single flag bit removes an entry from selection while leaving it fully
+visible to tooling.** Setting bit 20 or bit 21 of an entry's `flags` field makes
+the driver refuse a container holding one otherwise valid cubin, returning
+"no binary for GPU", while `cuobjdump` lists that same entry and disassembles it
+completely. Neither side warns. The container is self-consistent: every size and
+offset is correct, and only one bit differs from a working file.
+
+| flags bit set | Driver | cuobjdump |
+|---|---|---|
+| none | runs it | disassembles fully |
+| bit 20 | refuses | disassembles fully |
+| bit 21 | refuses | disassembles fully |
+| bit 24 | runs it | disassembles fully |
 
 **The container carries no per-entry integrity metadata**, and the driver
 computes none at load time. Two entries differing only in payload produce
