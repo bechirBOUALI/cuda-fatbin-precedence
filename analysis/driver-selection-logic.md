@@ -56,7 +56,7 @@ Recovered by RE, then validated by parsing our own fatbins.
 
 | Offset | Type | Field |
 |---|---|---|
-| 0x00 | u16 | kind — **1 = PTX, 2 = ELF** |
+| 0x00 | u16 | kind, **1 = PTX, 2 = ELF** |
 | 0x04 | u32 | headerSize |
 | 0x08 | u64 | payloadSize |
 | 0x10 | u32 | compressedSize |
@@ -75,7 +75,7 @@ done, and the 64-byte header matches the 64 bytes of per-entry container
 overhead inferred from the same measurement.
 
 Validation against `build/ptxa_elfb.fatbin`: entry 1 kind 1 (PTX), header 80,
-payload 232, flags 0x8011, payload beginning `28 b5 2f fd` — the Zstandard
+payload 232, flags 0x8011, payload beginning `28 b5 2f fd`, the Zstandard
 magic. Entry 2 kind 2 (ELF), header 64, payload 3112, flags 0x11, payload
 beginning `\x7fELF`. So **PTX payloads are zstd-compressed while ELF payloads
 are stored raw**, and flag bit 0x8000 correlates with compression.

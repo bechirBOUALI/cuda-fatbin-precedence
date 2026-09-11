@@ -1,4 +1,4 @@
-# Step 1 — Fatbin entry precedence
+# Step 1, Fatbin entry precedence
 
 Measured 2026-09-10. Which entry does the CUDA driver execute when a fatbin
 contains more than one entry matching the running GPU?
@@ -64,15 +64,15 @@ For `ptxa_elfb.fatbin`, `cuobjdump -lelf -lptx` reports both entries. The PTX
 entry contains:
 
 ```
-mov.u32 %r2, 43690      // 0xAAAA — variant_a
+mov.u32 %r2, 43690      // 0xAAAA, variant_a
 ```
 
 The GPU executed 0xBBBB. The PTX describes code that never runs.
 
 Nothing in the PTX marks it as dead. Distinguishing a live entry from a dead
 one requires applying the driver's precedence rule, and that rule is not
-documented. Any analysis that reads the PTX — the tempting choice, since PTX is
-text while the alternative needs disassembly — is describing code the hardware
+documented. Any analysis that reads the PTX, the tempting choice, since PTX is
+text while the alternative needs disassembly, is describing code the hardware
 never executes.
 
 To be precise about scope: `cuobjdump` is not wrong here, it lists both
