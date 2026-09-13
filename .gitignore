@@ -5,3 +5,5 @@ build/
 *.fatbin
 loader
 leaktest
+__pycache__/
+*.pyc

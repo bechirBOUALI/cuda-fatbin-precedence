@@ -248,3 +248,30 @@ Bits 20 and 21 remove the entry from the driver's candidate set. Bit 24 does
 not. Every size and offset in the file remains correct, so no parser has any
 structural reason to object, and the disassembler happily prints the SASS of
 code the GPU will never run.
+
+## Correction, 2026-09-12: flag bits 20 and 21 are architecture suffixes
+
+Addendum 2 above describes bits 20 and 21 of the entry `flags` field as
+removing an entry from the driver's candidate set, and calls the effect
+invisible. The measurements in that section all still reproduce on driver
+597.06, but the mechanism is not what was claimed.
+
+The driver renders an entry's target as a name, `sm_<arch><suffix>`, and takes
+the suffix from those two bits: `a` for bit 20, `f` for bit 21. They are the
+suffixes `nvcc` exposes as `sm_90a` and `sm_100f`. Building one container per
+target and reading the bits back confirms it: `sm_90a` sets bit 20, `sm_100f`
+sets bit 21, and the plain targets set neither.
+
+So setting bit 20 on an sm_89 entry does not hide it. It makes the entry
+declare `sm_89a`, which is not a target any GPU reports, so the container has
+no candidate left and the load fails. Bit 24 is not part of the encoding,
+which is why it looked inert here; it appears on compute capability 100 and
+above.
+
+The consequence for tooling stands and is more precise than before.
+`cuobjdump -lelf` lists the entry as `sm_89`, dropping the suffix, while
+`cuobjdump -elf` reports `arch = sm_89a`. The field that decides whether the
+entry can run is present in one output and absent from the other, and the one
+that omits it is the listing a tool parses.
+
+Details and the instruction-level evidence are in `driver-selection-logic.md`.
