@@ -1,7 +1,7 @@
 # Where fatbin entry selection actually happens
 
 Reverse engineering of the CUDA user-mode driver to explain the precedence
-rules measured in `step1-entry-precedence.md` and `divergence-matrix.md`.
+rules measured in `entry-precedence.md` and `divergence-matrix.md`.
 
 Target: `libcuda.so.1.1`, 25 MB, fully stripped, from the WSL driver store at
 `/usr/lib/wsl/drivers/nvltwi.inf_amd64_508a7ec7f027b810/`. **Driver 597.06**,
@@ -9,12 +9,10 @@ which is the same driver every measurement in this repository was taken on.
 Note this is NOT `/usr/lib/wsl/lib/libcuda.so.1`, which is a 180 KB forwarding
 shim.
 
-Redone 2026-09-12. An earlier pass covered driver 595.71; those addresses do
-not survive the update and are gone from this document, because carrying
-addresses from a build you no longer have is worse than having none. Function
-boundaries here come from `.eh_frame` FDE records, since the binary has no
-local symbols, and virtual address equals file offset in this image because
-the first `LOAD` segment maps offset 0 at vaddr 0.
+Function boundaries come from `.eh_frame` FDE records, since the binary has no
+local symbols, and virtual address equals file offset in this image because the
+first `LOAD` segment maps offset 0 at vaddr 0. Addresses are build-specific and
+will not survive a driver update.
 
 ## The path, function by function
 
@@ -162,9 +160,7 @@ order for a claim like it. Two sm_89 cubins ordered A then B give A. Setting
 bit 24 on A alone gives B instead; setting it on B alone changes nothing. Both
 containers are in the corpus, and the C is in `decompiled-selection.md`.
 
-## What flag bits 20 and 21 actually are
-
-This corrects the earlier reading of them as an exclusion mechanism.
+## What flag bits 20 and 21 are
 
 The ranker renders each entry's target as a **name**, and the suffix of that
 name comes from those two bits:
@@ -195,9 +191,9 @@ reading the bits back:
 | `sm_100f` | 100 | `0x1200011` | no | **yes** |
 | `sm_120a` | 120 | `0x1100011` | **yes** | no |
 
-This changes what the measured behaviour means. Setting bit 20 on an sm_89
-entry does not hide it behind a flag; it makes the entry declare `sm_89a`, a
-target no GPU reports, so the container has no candidate and the load fails
+Setting bit 20 on an sm_89 entry therefore does not hide it behind a flag. It
+makes the entry declare `sm_89a`, a target no GPU reports, so the container has
+no candidate and the load fails
 with `CUDA_ERROR_NO_BINARY_FOR_GPU`. Bit 24, which had looked like an inert
 control, is simply not part of the suffix encoding: it appears on compute
 capability 100 and above regardless of suffix.
@@ -217,10 +213,9 @@ decides whether the entry can run at all.
 
 ## Integrity: measured, not inferred
 
-The earlier pass argued from disassembly that no integrity check exists. That
-is answered better by execution, so it was tested instead. Substituting two
-bytes inside the compiled SASS of a valid entry, leaving every size, offset and
-magic correct:
+Whether anything validates entry payloads is answered better by execution than
+by disassembly, so it was tested. Substituting two bytes inside the compiled
+SASS of a valid entry, leaving every size, offset and magic correct:
 
 ```
 $ make -C src/kernels tamper
@@ -231,9 +226,9 @@ marker  : 0xCCCC -> unrecognised
 
 The tampered kernel loads and executes, so neither the container nor the driver
 validates entry payloads. This matches the container-side evidence in
-`step1-entry-precedence.md`, where two containers differing only in their
-payloads are otherwise byte-identical, and it needs no assumptions about code
-the disassembly might have hidden.
+`entry-precedence.md`, where two containers differing only in their payloads
+are otherwise byte-identical, and it needs no assumptions about code the
+disassembly might have hidden.
 
 For the record on the driver side: FNV-1a-64 constants do occur in this
 binary, at `0x1fa354` and nearby, but in a region unrelated to the selection

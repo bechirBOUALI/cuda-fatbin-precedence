@@ -1,84 +1,27 @@
-# Fatbin entry kinds, identified by construction
+# Fatbin entry kinds
 
-Tested 2026-09-10. The reverse engineering in `driver-selection-logic.md`
-recovered a `kind` field at offset 0 of each entry and observed the values
-1, 2, 8, 0x10, 0x20, 0x40, 0x80 and 0x100 in the driver's code, but could only
-identify two of them. NVIDIA's `nvFatbin.h` creation API provides a way to
-settle the rest empirically: build a fatbin with a known input type, then read
-the kind back.
+Each entry carries a `kind` field, a u16 at offset 0. The driver's code
+references the values 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80 and 0x100. This
+document identifies them.
 
-## Method
-
-`nvFatbin.h` (library `libnvfatbin.so`, ships with the toolkit) exposes one
-`Add*` function per input type. The probe at `re/kind_probe.c` creates one
-fatbin per function and writes it out; the kind field is then read with the
-entry layout recovered by RE.
-
-LTO IR was obtained differently, by compiling with `nvcc -arch=lto_89 -dlto`
-and reading the kind out of the resulting object directly.
+Two independent sources settle almost all of it. `cuobjdump` carries a
+kind-to-name switch and prints NVIDIA's own name for each value, and
+`libnvfatbin` exposes one `Add*` function per input type, so a container can be
+built with a known input and the kind read back.
 
 ## Results
 
-| kind | Meaning | How identified |
+| kind | NVIDIA's name | How established |
 |---|---|---|
-| 1 (0x1) | PTX | `nvFatbinAddPTX` |
-| 2 (0x2) | ELF / cubin | `nvFatbinAddCubin` |
-| 8 (0x8) | LTO IR (NVVM) | `nvcc -dlto` object |
-| 0x40 (64) | Relocatable PTX from a host object | `nvFatbinAddReloc` |
-
-Kinds 1 and 2 confirm the hypothesis and match the RE. Kinds 8 and 0x40 were
-listed as unidentified by both RE passes and are now pinned.
-
-### Still unidentified
-
-- **0x10, 0x20, 0x80.** No known construction path, and none of the three is
-  reachable through the public `nvFatbin.h` API. The reverse engineering did
-  establish where 0x10 sits in the driver's preference order, between ELF (2)
-  and PTX (1), but not what it represents. Identifying it would need either a
-  construction path or further work on the driver's handler dispatch.
-- **0x100.** The Ghidra pass read this as a nested group or index entry. NVIDIA
-  documents `nvFatbinAddIndex` with the note "Currently, no method of creating
-  an index file is available", so it cannot be produced and the reading stays
-  unverified. The documentation and the RE are at least consistent.
-- **Tile IR.** `nvFatbinAddTileIR` exists but Tile IR appears only in
-  `nvrtc.h` and `nvFatbin.h`, with no nvcc path. Untested.
-
-## Incidental findings
-
-**The API's architecture string is a bare number.** `nvFatbinAddPTX` and
-`nvFatbinAddCubin` accept `"89"` and reject `"sm_89"`, `"compute_89"` and
-`"lto_89"` with `NVFATBIN_ERROR_INVALID_ARCH`. This is not stated in the header
-and cost several attempts to find.
-
-**Flag bit 0x8000 means compressed.** Across every sample, entries whose
-payload begins with the Zstandard magic have it set and entries beginning with
-`\x7fELF` do not. LTO IR additionally carries bit 0x10000.
-
-**Compression is not implied by kind.** In an ordinary build the ELF payload is
-raw, but in an `-rdc=true` object the ELF payload is zstd-compressed. A parser
-must read the flag rather than infer from entry kind.
-
-**The creation API validates architecture against the payload.** The error enum
-includes `NVFATBIN_ERROR_ELF_ARCH_MISMATCH` and `NVFATBIN_ERROR_PTX_ARCH_MISMATCH`.
-So the "entry header architecture disagrees with the embedded ELF" conflict case
-still open in `step1-entry-precedence.md` cannot be built with this API either.
-It has to be constructed by hand, like the other remaining cases.
-
-## Reproduction
-
-```sh
-cd re
-gcc -O1 -o kind_probe kind_probe.c -I/usr/local/cuda-13.2/include \
-    -L/usr/local/cuda-13.2/lib64 -lnvfatbin
-LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64 ./kind_probe
-```
-
-## The remaining kinds, identified 2026-09-14
-
-The four kinds left unidentified above are now settled, and the decisive
-evidence is not in the driver at all. `cuobjdump` carries a kind-to-name switch
-and prints the name for each, which makes this NVIDIA's own naming rather than
-an inference.
+| 1 | ptx | `nvFatbinAddPTX`; `cuobjdump` switch |
+| 2 | elf | `nvFatbinAddCubin`; `cuobjdump` switch |
+| 4 | cubin | `cuobjdump` switch |
+| 8 | nvvm (LTO IR) | `nvcc -dlto` object; `cuobjdump` switch |
+| 0x10 | **none** | `cuobjdump` prints `<unknown kind>`; see below |
+| 0x20 | index | `cuobjdump` switch; `nvFatbinAddIndex` writes it |
+| 0x40 | relocatable ptx | `nvFatbinAddReloc`; `cuobjdump` switch |
+| 0x80 | tile ir | `cuobjdump` switch; `nvFatbinAddTileIR` writes it |
+| 0x100 | contatenated entry | `cuobjdump` switch; the spelling is NVIDIA's |
 
 The switch is at `0x2a895` onward in the CUDA 13.2 build of `cuobjdump`, and
 each comparison is followed by the address of its label:
@@ -92,32 +35,25 @@ each comparison is followed by the address of its label:
 2b2e2:  cmp    $0x20,%ax   -> 0x8c8ec "index"
 ```
 
-| kind | NVIDIA's name | How confirmed |
-|---|---|---|
-| 0x20 | `index` | `cuobjdump` switch, and `nvFatbinAddIndex` writes 0x20 |
-| 0x80 | `tile ir` | `cuobjdump` switch, and `nvFatbinAddTileIR` writes 0x80 |
-| 0x100 | `contatenated entry` | `cuobjdump` switch; the typo is NVIDIA's |
-| 0x10 | **none** | `cuobjdump` has no case for it and prints `<unknown kind>` |
-
-The spelling `contatenated` is quoted as it appears. It also corrects the
-earlier reading of 0x100 as a "group" entry: the driver walks it as a counted
-table of nested entry headers, so "concatenated" describes it better.
+`contatenated entry` also describes 0x100 better than "group" would: the driver
+walks it as a counted table of nested entry headers whose offset is the u32 at
+entry+0x14.
 
 `nvFatbinAddIndex` writing kind 0x20 is visible directly, `mov $0x20,%ecx` at
-`0xb11f6` in `libnvfatbin.so.13.2.86`, on the path that appends the entry. That
-independently confirms the `cuobjdump` name, and it matches the API shape:
+`0xb11f6` in `libnvfatbin.so.13.2.86`. That matches the API shape, since
 `nvFatbinAddIndex` is the only `Add*` function in `nvFatbin.h` with no `arch`
 parameter, and the driver's filter accepts kind 0x20 without reading the
 entry's architecture or flags at all.
 
-Neither `index` nor `tile ir` could be produced here. `nvFatbinAddIndex`
-rejects synthetic input with `NVFATBIN_ERROR_INVALID_INDEX`, and the header
-says plainly "Currently, no method of creating an index file is available".
-`nvFatbinAddTileIR` rejects synthetic input with an internal error, and this
-toolkit would not emit TileIR from a `.cu` source. So these two are confirmed
-by name and by the code that writes them, not by round-tripping a sample.
+Neither `index` nor `tile ir` could be round-tripped into a sample.
+`nvFatbinAddIndex` rejects synthetic input with `NVFATBIN_ERROR_INVALID_INDEX`,
+and its header says plainly "Currently, no method of creating an index file is
+available". `nvFatbinAddTileIR` rejects synthetic input with an internal error,
+and this toolkit will not emit TileIR from a `.cu` source. Both are therefore
+established by name and by the code that writes the constant, not by building
+one.
 
-### Kind 0x10 remains unnamed
+## Kind 0x10 is unnamed
 
 NVIDIA names it nowhere on this machine: no case in `cuobjdump`, no `Add*`
 function in `libnvfatbin`, no sixth name in `fatbinary`'s kind list, and no
@@ -134,15 +70,43 @@ Capsule Mercury" and `EIATTR_MERCURY_FINALIZER_OPTIONS`. In the data center
 driver, 79 of the 335 embedded device ELFs carry `.nv.capmerc` or `.nv.merc`
 sections, and exactly those have the `e_flags` bit the handler tests.
 
-Best supported reading, and labelled as inference rather than fact: **an
-unfinalized device ELF that the driver finalizes before execution**. That fits
-its rank between ELF and PTX, its architecture-specific matching, and its
-separate options string. NVIDIA's own name for it is unknown.
+Best supported reading, **labelled as inference rather than fact**: an
+unfinalized device ELF that the driver finalizes before execution. That fits
+its rank between ELF and PTX, its architecture-specific matching and its
+separate options string. NVIDIA's own name for it remains unknown.
 
-### Method note
+## Incidental findings from the creation API
+
+**The architecture string is a bare number.** `nvFatbinAddPTX` and
+`nvFatbinAddCubin` accept `"89"` and reject `"sm_89"`, `"compute_89"` and
+`"lto_89"` with `NVFATBIN_ERROR_INVALID_ARCH`. This is not stated in the
+header.
+
+**Compression is not implied by kind.** In an ordinary build the ELF payload is
+raw, but in an `-rdc=true` object it is zstd-compressed. A parser must read
+flag bit 0x8000 rather than infer from the kind.
+
+**The creation API validates architecture against the payload.** The error enum
+includes `NVFATBIN_ERROR_ELF_ARCH_MISMATCH` and
+`NVFATBIN_ERROR_PTX_ARCH_MISMATCH`, so a container whose entry header disagrees
+with its embedded ELF cannot be built with this API. It has to be constructed
+by hand, which is how `entry-precedence.md` produces that case.
+
+## Reproduction
+
+```sh
+gcc -O1 -o kind_probe probes/kind_probe.c -I/usr/local/cuda-13.2/include \
+    -L/usr/local/cuda-13.2/lib64 -lnvfatbin
+LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64 ./kind_probe
+```
+
+`probes/kind_probe2.c` covers `nvFatbinAddIndex` and `nvFatbinAddTileIR`, the
+two that reject synthetic input, and reports the rejection rather than a kind.
+
+## Method
 
 Two independent reverse-engineering passes were run, one on the WSL build
 597.06 and one on the data center build 610.57.04, and they agreed on all four
-kinds. The `cuobjdump` switch, the `libnvfatbin` constant and the string
-evidence were then re-checked by hand against the binaries before being
-recorded here.
+previously unidentified kinds. The `cuobjdump` switch, the `libnvfatbin`
+constant and the string evidence were then re-checked by hand against the
+binaries.

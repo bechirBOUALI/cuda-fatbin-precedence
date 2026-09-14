@@ -1,9 +1,8 @@
 # "PTX Obfuscation": what the string in the driver means
 
-Investigated 2026-09-14. The container walk in `libcuda.so.1.1` references two
-strings, `PTX Obfuscation` and `TileIR Obfuscation`. This note establishes what
-they are, because the answer matters to anything that reads GPU code
-statically.
+The container walk in `libcuda.so.1.1` references two strings, `PTX
+Obfuscation` and `TileIR Obfuscation`. This note establishes what they are,
+because the answer matters to anything that reads GPU code statically.
 
 ## Where they appear
 
@@ -149,11 +148,6 @@ missing key; the reverse transform is simply not implemented in this driver.
 Two neighbouring strings round out the picture: "Can't load this binary kind,
 as it's not recognized" and "Can't JIT TileIR without libtileiras".
 
-This corrects an earlier reading in this note, which took `0x490490` to be a
-generic logger and the two strings to be its format arguments. The function is
-a logger, but the format lives in the descriptor and the strings are the
-feature names substituted into it.
-
 ## Why it matters here
 
 This is a legitimate IP-protection feature, and it is not a vulnerability. It
@@ -176,8 +170,3 @@ same way as PTX, which the second feature name implies but which no sample
 could confirm, since this toolkit would not emit TileIR. And whether any
 consumer anywhere implements the reverse transform, since neither `cuobjdump`
 nor the driver does.
-
-Settled since this note was first written: the key is in the container, the
-transform is reversible from it, and the driver refuses obfuscated entries
-because the feature is unimplemented there rather than because it lacks a
-key.

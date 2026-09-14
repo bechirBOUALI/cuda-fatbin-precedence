@@ -418,5 +418,9 @@ Set `CUDA_CACHE_DISABLE=1` for any manual run. Without it a cached JIT result
 from an earlier run can be served back and recorded as a fresh selection
 decision.
 
-The dated working notes behind all of this, including the measurements that
-were later corrected, are in `analysis/`.
+The evidence behind each finding is in `analysis/`: the measured rules in
+`entry-precedence.md`, the full corpus in `divergence-matrix.md`, the driver
+code as disassembly in `driver-selection-logic.md` and as decompiled C in
+`decompiled-selection.md`, the entry kinds in `fatbin-entry-kinds.md`, the
+obfuscation feature in `ptx-obfuscation.md`, and what was already public in
+`prior-art.md`.

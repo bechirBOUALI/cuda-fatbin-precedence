@@ -1,89 +1,97 @@
 # CUDA fat binary entry precedence
 
-When a CUDA fat binary contains more than one entry matching the running GPU,
-which one actually executes? NVIDIA documents the coarse rule, that a
-compatible cubin is preferred over PTX, and then stops: the runtime is said to
-find the "best matching" entry, with no statement of what breaks a tie between
-entries that match equally well. That gap decides whether a tool inspecting GPU
-code is looking at the code that runs.
+A CUDA fat binary holds several compiled forms of the same GPU code. The driver
+picks exactly one and runs it. Any tool that inspects, hashes or attests that
+code has to make the same choice, and where its rule and the driver's rule
+disagree it is describing code the hardware never executes. Neither side warns
+you.
 
-This repository measures the rule, confirms it against the driver's own code,
-and implements it.
+NVIDIA documents the coarse rule, that a compatible cubin is preferred over
+PTX, and then stops: the runtime is said to find the "best matching" entry,
+with no statement of what happens when several entries match equally well.
+Every finding below lies beneath that line.
 
-**Start with [WRITEUP.md](WRITEUP.md).** It is the whole argument in one place,
-in about 3200 words, with the decompiled C for the selection path.
+## What the driver actually does
 
-## The rule, in short
+| # | Finding | Evidence |
+|---|---|---|
+| 1 | Selection is a hierarchy: compatibility filter, then kind, then architecture proximity, then flag bit 24, then file order | [entry-precedence](analysis/entry-precedence.md) |
+| 2 | File order reverses by kind: the **first** cubin wins, the **last** PTX wins | [entry-precedence](analysis/entry-precedence.md) |
+| 3 | Flag bit 24 breaks a cubin tie, and the entry **without** it wins | [entry-precedence](analysis/entry-precedence.md) |
+| 4 | Flag bits 20 and 21 encode the `a` and `f` architecture-name suffix; the driver matches on the rendered name `sm_<arch><suffix>` | [driver-selection-logic](analysis/driver-selection-logic.md) |
+| 5 | Architecture is declared twice; selection reads the entry header, validation reads the embedded ELF, in that order | [entry-precedence](analysis/entry-precedence.md) |
+| 6 | Selection commits: a refused payload does not fall back to a good entry sitting next to it | [entry-precedence](analysis/entry-precedence.md) |
+| 7 | Nothing validates payloads; a two-byte edit inside compiled SASS loads and runs | [driver-selection-logic](analysis/driver-selection-logic.md) |
+| 8 | Flag bit 16 marks obfuscation; the key sits in the entry header and the transform is reversible from the file alone | [ptx-obfuscation](analysis/ptx-obfuscation.md) |
+| 9 | `--okey` collides two inputs through a decimal-to-hex round trip, leaving well under 32 bits of key space | [ptx-obfuscation](analysis/ptx-obfuscation.md) |
+| 10 | Decompression is keyed by a flag bit rather than by entry kind, and the decompressed size is not where format notes place it | [driver-selection-logic](analysis/driver-selection-logic.md) |
+| 11 | Entry kinds 0x20, 0x80 and 0x100 are `index`, `tile ir` and `contatenated entry`, NVIDIA's own spelling | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
+| 12 | Kind 0x10 is an ELF the driver finalizes before load. **Inference**, not confirmed: NVIDIA names it nowhere | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 
-Selection is a hierarchy, each level consulted only when the one above it ties.
-The first two levels restate what NVIDIA documents; the ones below them are the
-part that is not written down.
+The selection path is given as disassembly in
+[driver-selection-logic](analysis/driver-selection-logic.md) and as decompiled
+C in [decompiled-selection](analysis/decompiled-selection.md). What was already
+public before this work is set out in [prior-art](analysis/prior-art.md).
+[WRITEUP.md](WRITEUP.md) is the whole argument read end to end.
 
-| Level | Rule |
-|---|---|
-| 1. kind | ELF beats PTX, unconditionally |
-| 2. architecture | among entries of one kind, the nearest compatible one wins, independent of file order |
-| 3. flag bit 24 | among ELF entries still tied, the one **without** bit 24 wins |
-| 4. file order | ELF: the first wins. PTX: the **last** wins |
+## This is not only a laptop result
 
-So a PTX entry is unreachable whenever a cubin for the same architecture is
-present, and nothing in the PTX says so. `cuobjdump` lists both. An sm_86 cubin
-beats an exactly matching compute_89 PTX on an sm_89 GPU, because kind decides
-first.
+The measurements were taken on a laptop GPU, but the same selection code ships
+in NVIDIA's Linux **data center** driver, the branch validated for HGX
+A100/A800, H100 and H800. Confirmed by static comparison against
+`libcuda.so.610.57.04`: the architecture-name rendering including both suffix
+bits, the flag bit 24 tie-break, the kind cascade, the TileIR dispatch through
+`libnvidia-tileiras.so` and the obfuscation path all appear there in the same
+shape.
 
-Measured against the GPU on 29 containers built to conflict, and on 343
-containers in NVIDIA's own shipped libraries:
+Two limits, stated plainly. Nothing was executed on that driver, since no data
+center hardware was available, so this is static evidence that the code is
+present rather than a measurement that it behaves identically. And that build
+carries additional selector policies absent from the laptop driver, including
+one that reorders the kind hierarchy, so behaviour under those policies is
+uncharacterised.
+
+## Why it matters
+
+Every container below was loaded on the GPU, so what executed is measured
+rather than predicted.
 
 | reading | wrong, built corpus | wrong, shipped libraries |
 |---|---|---|
 | first entry not exceeding the GPU | 15 of 29 | 342 of 343 |
-| first entry matching the GPU exactly | 15 of 29 | 195 of 343 |
-| the first PTX entry | 16 of 29 | 342 of 343 |
-| the driver's rule, `would_execute()` | 0 of 29 | reference |
+| first exact architecture match | 15 of 29 | 195 of 343 |
+| first PTX entry | 16 of 29 | 342 of 343 |
+| `would_execute()`, this repository | **0 of 29** | reference |
 
-None of this needs a crafted file. An ordinary `nvcc -arch=sm_89 -c` already
-emits a container whose PTX entry cannot run, and `cuobjdump` lists it without
-comment.
+The second column needs no attacker. Those are NVIDIA's own shipped libraries,
+unmodified, where a first-match reading lands on an entry the GPU would refuse
+to run. Nor does it need a multi-architecture build: an ordinary
+`nvcc -arch=sm_89 -c` already emits a container whose PTX entry cannot run, and
+`cuobjdump` lists it without comment. Full table in
+[divergence-matrix](analysis/divergence-matrix.md).
 
-Entry kinds are named as `cuobjdump`'s own kind-to-name switch prints them:
-1 = ptx, 2 = elf, 4 = cubin, 8 = nvvm, 0x20 = index, 0x40 = relocatable ptx,
-0x80 = tile ir, 0x100 = "contatenated entry", NVIDIA's spelling. It has no case
-for 0x10 and calls that one `<unknown kind>`.
+## What the parser adds
 
-Two further results. Bits 20 and 21 of an entry's `flags` field are the
-architecture-name suffix, `a` and `f`, so an entry can declare `sm_89a` while
-`cuobjdump -lelf` lists it as plain `sm_89` and disassembles it in full; no GPU
-reports that target, so the container does not load. And with
-`CUDA_FORCE_PTX_JIT=1` the PTX entry wins instead, so the same bytes run
-different code on different hosts.
+`scripts/fatbin_parser.py` answers the question the format does not: for each
+entry, whether the driver would execute it.
 
-A cubin states its architecture twice, in the entry header and in the embedded
-ELF, and the two can disagree: selection reads the header and validation reads
-the ELF, while `cuobjdump` reports one through `-lelf` and the other through
-`-elf`. Flag bit 24 decides between two otherwise equal cubins, and the entry without
-it wins, so setting that one bit on the first of two entries makes the second
-one execute.
+- **It can answer "nothing runs."** A first-match scanner structurally cannot
+  produce that verdict, yet it is the correct answer for three container shapes
+  here.
+- **It takes the target and the host policy as arguments**, so `sm_90a` and a
+  `CUDA_FORCE_PTX_JIT` host are parameters rather than separate code paths.
+- **It hashes the decompressed payload**, so identical device code cannot hash
+  differently merely because a compression setting changed.
+- **It decompresses on the flag, not the kind**, which is what stops compressed
+  cubins from being read as garbage.
+- **It flags an architecture disagreement** between the entry header and the
+  embedded ELF, a field `cuobjdump` reports inconsistently across its own two
+  modes.
+- **It reports an obfuscated entry as a distinct outcome**, not as an entry
+  with no code, which is how the shipped tooling presents it.
 
-Separately, a two-byte edit inside an entry's compiled SASS loads and runs, so
-nothing validates entry contents. And the toolkit's keyed obfuscation feature,
-flagged by bit 16, leaves an entry's metadata fully readable while making its
-code opaque to `cuobjdump` and to the driver alike.
-
-## Layout
-
-```
-WRITEUP.md   the argument, start here
-analysis/    dated working notes, including measurements later corrected,
-             the divergence matrix, the driver reverse engineering as both
-             disassembly and decompiled C, and what was already documented
-             or published before this work
-scripts/     the parser, the divergence matrix, the shipped-library survey
-src/         test kernels and a minimal Driver API loader
-probes/      small programs that identify entry kinds via libnvfatbin
-```
-
-`analysis/` is a lab notebook kept in the order it was written, so earlier
-files contain statements that later files correct. `WRITEUP.md` is the result.
+All 343 shipped containers parse with no structural complaint, so it is
+exercised on real code and not only on its own corpus.
 
 ## Reproducing
 
@@ -91,7 +99,7 @@ Needs a CUDA toolkit, a supported GPU, and Python with `pyelftools` and
 `zstandard`.
 
 ```sh
-make -C src/kernels                  # cubins, PTX, and 20 conflict containers
+make -C src/kernels                  # cubins, PTX, and 29 conflict containers
 make -C src/harness                  # the loader
 python3 scripts/divergence_matrix.py # the matrix, measured against the GPU
 python3 scripts/survey_libs.py       # the same question on shipped libraries
@@ -101,14 +109,25 @@ python3 scripts/fatbin_parser.py build/ptxa_elfb.fatbin
 Set `CUDA_CACHE_DISABLE=1` for any manual run, or a cached JIT result can be
 mistaken for a fresh selection decision. The matrix script sets it itself.
 
-## Environment these results came from
+## Layout
+
+```
+WRITEUP.md   the argument end to end
+analysis/    the evidence behind each finding above
+scripts/     the parser, the divergence matrix, the shipped-library survey
+src/         test kernels and a minimal Driver API loader
+probes/      programs that identify entry kinds via libnvfatbin
+```
+
+## Scope
 
 NVIDIA RTX 2000 Ada Generation Laptop, compute capability 8.9, driver 597.06,
-CUDA 13.2, Ubuntu 22.04 under WSL2. Measurements are conditional on that. The
-precedence rules were also read out of the driver binary, so they are expected
-to hold more broadly, but that is an expectation and not a measurement.
+CUDA 13.2, Ubuntu 22.04 under WSL2. Every measurement is conditional on that.
+The driver reverse engineering was done on the same build, so both halves agree
+on version, and the addresses are build-specific: they will not survive a
+driver update.
 
 Nothing here is a driver vulnerability. The driver applies its own rule
 correctly and consistently; the gap is between that rule and the one a
-convenient static reading uses. Every payload in this repository writes a
-marker value and nothing else.
+convenient static reading uses, and it lives in the tooling. Every payload in
+this repository writes a marker value and nothing else.

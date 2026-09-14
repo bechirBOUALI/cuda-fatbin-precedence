@@ -14,7 +14,7 @@ The same statement appears in the Pascal and Blackwell guides and, less
 formally, in the CUDA Pro Tip post on fat binaries and in NVIDIA staff answers
 on the developer forums.
 
-This means levels 0 and 1 of the hierarchy in `step1-entry-precedence.md`
+This means levels 0 and 1 of the hierarchy in `entry-precedence.md`
 restate documented behaviour. The measurements confirm it. They do not discover
 it, and the write-up now says so.
 
@@ -40,7 +40,7 @@ which is the bits-20-and-21 finding here.
 states that a unique identifier "is enforced as only one entry per sm of each
 unique identifier". This supports rather than undercuts the work: it is why the
 conflicting containers in the corpus have to be built deliberately, which
-`step1-entry-precedence.md` already recorded as a negative result.
+`entry-precedence.md` already recorded as a negative result.
 
 ## Published reverse engineering by others
 
@@ -64,14 +64,13 @@ research is memory-safety fuzzing of the binary utilities, which is where the
 channels and SASS integrity work. No published analysis of parser-versus-driver
 disagreement over which entry is live was found.
 
-## What changed because of this check
+## Scope of the claim
 
-The opening of `WRITEUP.md` and `README.md` claimed the precedence rule was
-undocumented, without qualification. That overstated the case, since the
-cubin-beats-PTX part is documented in several places, and a reader who knows
-the compatibility guides would have caught it immediately. Both now state the
-documented rule first and locate the contribution below it. The write-up gained
-a section separating what was already known from what is new.
+Saying the precedence rule is undocumented, without qualification, would
+overstate the case: the cubin-beats-PTX part is documented in several places,
+and a reader who knows the compatibility guides would catch it immediately. So
+`README.md` and `WRITEUP.md` state the documented rule first and locate the
+contribution below it.
 
 Searches run 2026-09-14 covering: driver selection and precedence among fat
 binary entries; duplicate same-architecture entries and tie-breaking; the entry

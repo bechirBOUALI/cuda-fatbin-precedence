@@ -4,7 +4,7 @@ Companion to `driver-selection-logic.md`, which gives the same findings as
 disassembly. This file gives them as C, which is easier to read and harder to
 misread.
 
-Produced 2026-09-12 with Ghidra 12.1.2 headless against
+Produced with Ghidra 12.1.2 headless against
 `/usr/lib/wsl/drivers/nvltwi.inf_amd64_508a7ec7f027b810/libcuda.so.1.1`,
 driver 597.06, the same binary and build as every other result here. Full
 auto-analysis found all three functions at the entry points the disassembly had

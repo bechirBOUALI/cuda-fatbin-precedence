@@ -11,7 +11,7 @@ PTX, and leaves the ranking among several matching candidates unstated. The
 full rule is not "the first matching entry", so a tool that inspects, hashes or
 attests the wrong entry is describing code the hardware never runs. The rule implemented in `would_execute` was measured black-box and
 then confirmed against the driver's own code; see
-`analysis/step1-entry-precedence.md` and `analysis/driver-selection-logic.md`.
+`analysis/entry-precedence.md` and `analysis/driver-selection-logic.md`.
 
 Usage:
     fatbin_parser.py <file> [--sm 89] [--policy default|force-ptx-jit] [--json]
