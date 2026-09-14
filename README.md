@@ -60,7 +60,9 @@ it wins, so setting that one bit on the first of two entries makes the second
 one execute.
 
 Separately, a two-byte edit inside an entry's compiled SASS loads and runs, so
-nothing validates entry contents.
+nothing validates entry contents. And the toolkit's keyed obfuscation feature,
+flagged by bit 16, leaves an entry's metadata fully readable while making its
+code opaque to `cuobjdump` and to the driver alike.
 
 ## Layout
 

@@ -74,6 +74,11 @@ KIND_RANK = {KIND_ELF: 3, 0x10: 2, KIND_PTX: 1}
 # alone suggests, and an entry declaring a target the GPU does not report is
 # simply not a candidate.
 FLAG_COMPRESSED     = 1 << 15
+# Bit 16 marks a payload obfuscated by fatbinary's keyed -reorder-obfuscation.
+# The entry keeps its kind, its metadata stays readable, and the code does not:
+# without the key neither cuobjdump nor the driver can decode it. See
+# analysis/ptx-obfuscation.md.
+FLAG_OBFUSCATED     = 1 << 16
 FLAG_ARCH_SUFFIX_A  = 1 << 20
 FLAG_ARCH_SUFFIX_F  = 1 << 21
 # Bit 24 loses the ELF-against-ELF tie-break: where two cubins are otherwise
@@ -192,6 +197,7 @@ class Entry:
         self.flags = hdr.flags
         self.kind_name = KIND_NAMES.get(hdr.kind, f"unknown_{hdr.kind:#x}")
         self.compressed = bool(hdr.flags & FLAG_COMPRESSED)
+        self.obfuscated = bool(hdr.flags & FLAG_OBFUSCATED)
         self.arch_suffix = ("a" if hdr.flags & FLAG_ARCH_SUFFIX_A
                             else "f" if hdr.flags & FLAG_ARCH_SUFFIX_F
                             else "")
@@ -199,6 +205,11 @@ class Entry:
         self.notes = []
 
         self.ident, self.ptxas_options = self.read_strings(blob)
+        if self.obfuscated:
+            self.notes.append(
+                "payload is obfuscated (flags bit 16): the code cannot be read "
+                "without the obfuscation key, though the metadata above is "
+                "accurate. This is not an entry with no code")
 
         start = offset + hdr.header_size
         stored = bytes(blob[start:start + hdr.payload_size])
@@ -304,6 +315,11 @@ class Entry:
         compressed ELF entries and such a parser reads them as garbage.
         """
         if not stored:
+            return b""
+        if self.obfuscated:
+            # Deliberately not attempted. The stored bytes are not a valid zstd
+            # frame, and reporting a decompression failure here would describe
+            # it as corrupt when it is intact and merely unreadable.
             return b""
         if not self.compressed and not stored.startswith(ZSTD_MAGIC):
             return stored
@@ -638,6 +654,7 @@ def describe(path, sm, policy, suffix=""):
                 "decompressed_size": e.hdr.decompressed_size,
                 "flags": f"{e.flags:#x}",
                 "arch_suffix": e.arch_suffix,
+                "obfuscated": e.obfuscated,
                 "elf_arch": e.elf_arch,
                 "deprioritised": e.deprioritised,
                 "identifier": e.ident,
@@ -661,7 +678,8 @@ def print_report(containers):
               f"{'comp':<5} {'flags':<10} {'sha256':<16} runs")
         for e in c["entries"]:
             print(f"   {e['index']:>2}  {e['kind_name']:<9} {e['arch_label']:<11} "
-                  f"{e['payload_size']:>8} {'zstd' if e['compressed'] else '-':<5} "
+                  f"{e['payload_size']:>8} "
+                  f"{'obf' if e['obfuscated'] else 'zstd' if e['compressed'] else '-':<5} "
                   f"{e['flags']:<10} {(e['payload_sha256'] or '')[:16]:<16} "
                   f"{'<== EXECUTES' if e['executes'] else ''}")
             if e["identifier"]:

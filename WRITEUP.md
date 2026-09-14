@@ -289,6 +289,28 @@ a perfectly good sm_89 cubin second, and the load fails rather than falling back
 to the good one. One entry is chosen and that decision is final, which is worth
 knowing because "best matching" suggests otherwise.
 
+## When the code cannot be read at all
+
+The toolkit ships a keyed obfuscation feature, and the driver carries its two
+labels, `PTX Obfuscation` and `TileIR Obfuscation`, in the container walk.
+`fatbinary --okey=<n> -reorder-obfuscation` transforms a PTX payload and sets
+bit 16 of the entry flags. The entry keeps its kind, and the container keeps
+correct architecture, ISA version and size.
+
+What changes is readability. `cuobjdump` reports the entry's metadata in full
+and then says it cannot deobfuscate the entry without the key, followed by "No
+PTX file found to extract", which is easy to read as an entry that simply has
+no PTX. The driver is no better off: without the key it returns
+`CUDA_ERROR_INVALID_PTX`.
+
+This is an intellectual-property feature rather than a defect, and it is worth
+naming because it is the limit case of everything above. Elsewhere the problem
+is a tool reading the wrong entry. Here a tool can read no entry, while the
+container still looks entirely well formed. A policy of "extract the PTX and
+inspect it" needs "the PTX could not be extracted" as a distinct outcome, not
+as an empty one. The parser reports it as such. Details are in
+`analysis/ptx-obfuscation.md`.
+
 ## Two things that are not in the container at all
 
 **The architecture is a name, and the listing drops half of it.** Two bits of
