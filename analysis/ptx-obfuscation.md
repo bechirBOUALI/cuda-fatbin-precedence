@@ -49,7 +49,7 @@ Building the same PTX three ways, on this toolkit:
 | Build | entry kind | entry flags | payload |
 |---|---|---|---|
 | plain | 1 | `0x8011` | zstd, decompresses to readable PTX |
-| `--okey=12345` | 1 | `0x8011` | zstd, still readable PTX; only 3 header bytes change |
+| `--okey=12345` | 1 | `0x8011` | zstd, still readable PTX; only the key field changes |
 | `--okey=12345 -reorder-obfuscation` | 1 | **`0x18011`** | not a valid zstd frame; 234 bytes differ |
 
 So obfuscation is a **flag, not a kind**. The entry stays kind 1, and bit 16
@@ -64,27 +64,50 @@ rather than for compiled binaries.
 
 ## The key is stored in the container
 
-This is the part that undercuts the feature. The 8-byte field at entry+0x30,
-which is zero in every ordinary build and which format notes usually call
-reserved, holds the key. It is encoded as BCD: the decimal digits of the value
-given to `--okey`, read as hex nibbles, little-endian.
+The 8-byte field at entry+0x30, zero in every ordinary build and easily taken
+for padding, holds the key.
 
-| `--okey` | field at entry+0x30 |
+The stored value looks at first like BCD, the decimal digits of the key read as
+hex nibbles: `--okey=12345` stores `0x12345`, `--okey=1000000` stores
+`0x1000000`. It is not a deliberate encoding. `fatbinary` parses the option with
+a base-prefix-aware integer parse, then re-emits it as a **decimal** string for
+the creation library, which parses it back as **hex**. The round trip is what
+produces the digit-preserving pattern, and two inputs settle it:
+
+| `--okey` | stored |
 |---|---|
-| 99 | `0x99` |
-| 100 | `0x100` |
-| 12345 | `0x12345` |
-| 65535 | `0x65535` |
-| 1000000 | `0x1000000` |
+| 0x1234 | `0x4660` |
+| 4660 | `0x4660` |
 
-So the entry header is not "reserved" there, and a reader holding only the file
-holds the key as well. Whether that is sufficient to reverse the transform, or
-whether the value only identifies a secret held elsewhere, is still being
-checked. Either way the field should be recorded as the key and not as
-padding.
+`0x1234` is 4660, re-emitted as "4660", read back as `0x4660`. So the two forms
+collide, and the effective key space is smaller than it looks: the accepted
+range stops at 99999999, and every stored nibble is a decimal digit, leaving
+well under 32 bits of real entropy.
 
-Very large values are refused by `fatbinary`; 987654321 and 4294967295 both
-fail to build.
+## The obfuscation does not protect the code
+
+The transform is reversible from the file alone, because the file carries the
+key. Verified here by recovering the plaintext: the payload is transformed with
+a keyed byte-wise stream cipher using a fixed substitution table that ships
+inside `libnvfatbin`, with ciphertext feedback chaining each byte to the
+previous one, and a keystream from the ordinary C library `rand()` generator
+seeded with the key. Everything needed is either in the container or in a
+library on any machine with the toolkit installed.
+
+Reimplementing that from the shipped tables recovers the original PTX in full,
+including the kernel body and its marker constant, from
+`fatbinary --okey=12345 -reorder-obfuscation` output. The first four recovered
+bytes are the zstd magic, and decompressing gives back readable PTX.
+
+The conclusion is that `--okey` is a speed bump, not a protection boundary. It
+stops a tool that has not been taught the format; it stops nothing else. That
+is worth stating plainly because the option's own help text says it will cause
+binaries "to be obfuscated using the specified key", which invites more
+confidence than the construction supports.
+
+A working recovery script was written to confirm this and is deliberately not
+included in this repository. The description above is sufficient for anyone who
+needs to reproduce the analysis.
 
 ## What each side can see
 
@@ -103,9 +126,11 @@ compile_size = 64bit
 compressed
 ```
 
-The entry's **metadata is fully readable** while its **code is not**. A tool
-sees an entry for sm_89 at PTX ISA 9.2 and cannot see a single instruction of
-it.
+The entry's **metadata is fully readable** while its **code is not**, at least
+as far as the shipped tools are concerned. `cuobjdump` has no way to accept a
+key at all: it tests the flag bit, warns, and never reads the key field sitting
+in the entry header. So the message naming a missing key is misleading, and a
+tool that does implement the transform needs nothing from the user.
 
 The driver refuses it too, and it says why. Loading the container returns
 `CUDA_ERROR_INVALID_PTX`, and the two strings in the walk are not labels after
@@ -146,11 +171,13 @@ mistake for an entry that simply has no PTX.
 
 ## Open
 
-Given that the key sits in the file, what the obfuscation actually protects,
-and whether the embedded value is the secret or merely names one. What
-`state+0x98` is. And whether TileIR is obfuscated the same way as PTX, which
-the second feature name implies but which no sample could confirm, since this
-toolkit would not emit TileIR.
+What `state+0x98` is beyond holding the key. Whether TileIR is obfuscated the
+same way as PTX, which the second feature name implies but which no sample
+could confirm, since this toolkit would not emit TileIR. And whether any
+consumer anywhere implements the reverse transform, since neither `cuobjdump`
+nor the driver does.
 
-Settled since this note was written: the driver refuses obfuscated entries
-because the feature is unimplemented there, not because it lacks the key.
+Settled since this note was first written: the key is in the container, the
+transform is reversible from it, and the driver refuses obfuscated entries
+because the feature is unimplemented there rather than because it lacks a
+key.

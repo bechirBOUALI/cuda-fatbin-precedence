@@ -307,6 +307,12 @@ why: the two strings in the walk are arguments to "Feature: '%s' not yet
 implemented", so this driver recognises obfuscated payloads and does not
 implement them.
 
+The protection is thin. The key is in the container, and the transform is a
+keyed byte-wise stream cipher over a substitution table that ships inside
+`libnvfatbin`, so it is reversible from the file plus any toolkit installation.
+Reimplementing it recovers the original PTX in full. `--okey` stops a tool that
+has not been taught the format and stops nothing else.
+
 This is an intellectual-property feature rather than a defect, and it is worth
 naming because it is the limit case of everything above. Elsewhere the problem
 is a tool reading the wrong entry. Here a tool can read no entry, while the
