@@ -54,9 +54,44 @@ identify the bits that carry the architecture-name suffix or the tie-break.
 The authors are explicit that field meanings were inferred by comparing
 binaries and are "by no means a standard".
 
+**The threat model is Stealthium's, and they state it plainly.** The same
+write-up names the attack this work sits on top of: "Legitimate code for SM_80
+(A100 GPUs), Malicious code for SM_89 (L40 GPUs), Different behaviour for
+SM_86 (RTX 3090) versus SM_90 (H100)". It adds that "no published research has
+examined the risk of architecture-specific malicious payloads within fatbins".
+So the idea that a fat binary can carry different code per architecture, and
+that this is a security problem, is theirs and was published first. What is not
+there is the rule: their account of selection is the two-tier "matching SM
+version, else PTX", with nothing on compatible-but-not-exact cubins, the
+tie-breaks, or the flag bits.
+
+Their product hooks `cuModuleLoadData` with an eBPF uprobe and hashes every
+entry it finds. That vantage point beats reading a file section, since it also
+catches containers assembled on the heap, but it sits upstream of the decision:
+selection happens afterwards inside `libcuda`, so capturing the container does
+not say which entry of it runs.
+
+**Runtime observation is a solved problem, by an official mechanism.** CUPTI's
+`CUPTI_CBID_RESOURCE_MODULE_LOADED` hands a profiler the payload the driver
+selected rather than the container. Measured here: a 6368-byte container
+holding two sm_89 cubins yields 3112 bytes, a bare ELF, carrying only the
+winning kernel's marker, matching the driver on every case tried. It needs the
+code to execute, and it returns SASS without provenance, since a 640-byte
+PTX-only container yields a 3112-byte ELF found nowhere in the input. But any
+claim that nothing can observe the selected entry would be wrong.
+
 **Open-source parsers enumerate, they do not select.** The fat binary parsers
-that exist extract and list entries. None consulted models which entry the
-driver would execute.
+that exist extract and list entries. The clearest case is ZLUDA, the one
+project that must consume real fat binaries to function: it discards every
+cubin, `if file.header.kind != HEADER_KIND_PTX { return; }`, then walks PTX
+entries in reverse behind a literal `// TODO: actually sort by SM`. The rule is
+not merely undocumented, it is unimplemented outside NVIDIA.
+
+**The same attack class is established on another platform.** Patrick Wardle
+showed in 2024 that macOS's `macho_best_slice()` can disagree with what `dyld`
+actually runs, and that security tools trusting it can be evaded. The contrast
+is the useful part: Apple ships an API whose whole job is naming the slice that
+will run, and CUDA ships no equivalent call.
 
 **The adjacent security work is about something else.** Published CUDA tooling
 research is memory-safety fuzzing of the binary utilities, which is where the
@@ -71,6 +106,12 @@ overstate the case: the cubin-beats-PTX part is documented in several places,
 and a reader who knows the compatibility guides would catch it immediately. So
 `README.md` and `WRITEUP.md` state the documented rule first and locate the
 contribution below it.
+
+Two further claims had to be narrowed. The threat model is not this work's, it
+is Stealthium's and was published first, so what is claimed here is the rule
+rather than the idea. And "nothing can tell which entry runs" is false, since
+CUPTI reports exactly that at runtime, so the claim is narrowed to determining
+it from the file without executing it.
 
 Searches run 2026-09-14 covering: driver selection and precedence among fat
 binary entries; duplicate same-architecture entries and tie-breaking; the entry
@@ -89,3 +130,6 @@ can establish" rather than "first".
 - Inside CUDA Fatbins, Part 1, Stealthium, https://stealthium.io/blog/fatbins-cuda-gpu-binary-formats-part-1
 - Demystifying CUDA fat binaries, NVIDIA developer forums, https://forums.developer.nvidia.com/t/demistifying-cuda-fat-binaries/65607
 - cudaparsers, https://github.com/vivekpanyam/cudaparsers
+- ZLUDA, `zluda/src/impl/module.rs`, https://github.com/vosen/ZLUDA
+- CUpti_ModuleResourceData, NVIDIA, https://docs.nvidia.com/cupti/api/structCUpti__ModuleResourceData.html
+- Patrick Wardle on macOS universal binary slice selection, 2024, https://objective-see.org/blog.html

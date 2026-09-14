@@ -1,10 +1,16 @@
 # CUDA fat binary entry precedence
 
 A CUDA fat binary holds several compiled forms of the same GPU code. The driver
-picks exactly one and runs it. Any tool that inspects, hashes or attests that
-code has to make the same choice, and where its rule and the driver's rule
-disagree it is describing code the hardware never executes. Neither side warns
-you.
+picks exactly one and runs it, by a rule NVIDIA does not publish.
+
+Watching what ran is a solved problem. CUPTI reports the selected payload back
+to a profiler on live hardware, and eBPF probes on the CUDA API see every
+container as it loads. The open question is the one before execution: **given
+the file, which entry will run**. That is what a scanner reading a wheel in a
+registry has to answer, what an attestation mapping observed code back to a
+shipped entry has to answer, and what anyone reasoning about a GPU they do not
+have in front of them has to answer. None of it can be settled by running the
+code.
 
 NVIDIA documents the coarse rule, that a compatible cubin is preferred over
 PTX, and then stops: the runtime is said to find the "best matching" entry,
@@ -27,6 +33,9 @@ Every finding below lies beneath that line.
 | 10 | Decompression is keyed by a flag bit rather than by entry kind, and the decompressed size is not where format notes place it | [driver-selection-logic](analysis/driver-selection-logic.md) |
 | 11 | Entry kinds 0x20, 0x80 and 0x100 are `index`, `tile ir` and `contatenated entry`, NVIDIA's own spelling | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 | 12 | Kind 0x10 is an ELF the driver finalizes before load. **Inference**, not confirmed: NVIDIA names it nowhere | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
+
+Below illustration of Row 1 to 3 as the
+driver applies them, one container narrowed to one kernel:
 
 ![One fat binary, six entries, five eliminated by header fields, one running on the GPU](docs/entry-selection.gif)
 
@@ -75,9 +84,9 @@ shipped libraries carry more than one entry. Any tool reading GPU code out of a
 binary therefore has to decide which entry it is reading, on nearly every file
 it meets.
 
-Nothing in the container answers that for it, and the shipped tooling does not
-either. `cuobjdump` lists every entry with nothing marking which one the driver
-would run. It reports a different architecture for the same entry through
+Nothing in the container answers that for it, and no tool that reads the file
+does either. `cuobjdump` lists every entry with nothing marking which one the
+driver would run. It reports a different architecture for the same entry through
 `-lelf` than through `-elf`. And for an obfuscated entry it prints "No PTX file
 found to extract", which reads like an entry with no PTX rather than one whose
 PTX it could not decode. Those are measurements of NVIDIA's own tools.
@@ -108,6 +117,39 @@ Nothing here is an attack on that supply chain, and none was demonstrated. The
 point is narrower: anything built to scan, hash or attest GPU code has to
 answer which entry actually runs before it can claim to have looked at the
 code.
+
+## What already exists, and where it stops
+
+Worth being precise about, since two mechanisms partly cover this ground.
+
+**CUPTI answers it at runtime.** A profiler subscribing to
+`CUPTI_CBID_RESOURCE_MODULE_LOADED` receives the payload the driver selected,
+not the container. Measured here: loading a 6368-byte container holding two
+sm_89 cubins hands back 3112 bytes, a bare ELF, carrying only the winning
+kernel's marker, and it tracked the driver on every case tried. So "what ran"
+is available, officially, on a host you control while it runs.
+
+Two things it does not give. It needs the code to execute, which a registry
+scan cannot do. And it returns compiled SASS without provenance: a 640-byte
+PTX-only container yields a 3112-byte ELF that appears nowhere in the input, so
+mapping observed code back to a shipped entry still needs the rule.
+
+**eBPF sees the container, not the choice.** Instrumenting `cuModuleLoadData`
+captures the bytes handed to the driver, which is strictly better than reading
+a file section since it also catches containers built on the heap. But
+selection happens afterwards, inside `libcuda`, so that vantage point holds the
+same ambiguity a static reader holds.
+
+**No tool models the selection from the file.** ZLUDA is the clearest case,
+being the one project that must consume real fat binaries: it discards every
+cubin outright, `if file.header.kind != HEADER_KIND_PTX { return; }`, then
+walks PTX in reverse behind a literal `// TODO: actually sort by SM`. The rule
+is not merely undocumented, it is unimplemented outside NVIDIA.
+
+For contrast, Apple ships `macho_best_slice()` precisely so tools can ask which
+slice of a universal binary will run, and Patrick Wardle showed in 2024 that
+where it disagrees with the loader, scanners can be evaded. CUDA has no
+equivalent call.
 
 ## What the parser adds
 
