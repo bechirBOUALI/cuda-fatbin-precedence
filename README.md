@@ -69,33 +69,30 @@ uncharacterised.
 
 ## Why it matters
 
-Any tool that inspects GPU code has to choose which of the entries to look at.
-These are the obvious ways to choose, and how often each one lands on an entry
-that is not the one the GPU runs.
+Selection only matters when a container holds more than one candidate, and it
+almost always does: **339 of the 343** fat binaries in the CUDA toolkit's own
+shipped libraries carry more than one entry. Any tool reading GPU code out of a
+binary therefore has to decide which entry it is reading, on nearly every file
+it meets.
 
-| How a tool picks the entry to inspect | Wrong, of 29 built | Wrong, of 343 shipped |
-|---|---|---|
-| the first entry the GPU could run | 15 | 342 |
-| the first entry whose architecture matches exactly | 15 | 195 |
-| the first PTX entry, since PTX is readable text | 16 | 342 |
-| **the driver's own rule**, `would_execute()` | **0** | it is the baseline |
+Nothing in the container answers that for it, and the shipped tooling does not
+either. `cuobjdump` lists every entry with nothing marking which one the driver
+would run. It reports a different architecture for the same entry through
+`-lelf` than through `-elf`. And for an obfuscated entry it prints "No PTX file
+found to extract", which reads like an entry with no PTX rather than one whose
+PTX it could not decode. Those are measurements of NVIDIA's own tools.
 
-*Wrong* means the tool names one entry and a different one executes.
+It takes no crafted file to reach this. An ordinary `nvcc -arch=sm_89 -c`
+already emits a container whose PTX entry can never run on the GPU it was built
+for, and nothing in the output says so.
 
-The two columns are evidence of different strength, which is worth being
-explicit about. The 29 built containers were each loaded on a real GPU and the
-marker read back, so that column compares every reading against hardware. The
-343 shipped containers are NVIDIA's own libraries, unmodified and never built
-to conflict, and they carry no marker to read back, so there each reading is
-compared against the driver's rule instead. That rule is not assumed correct:
-the first column is what establishes it, agreeing with hardware on all 29.
-
-The second column is the one to sit with, because no attacker appears in it.
-Those are stock libraries where a first-match reading lands on an entry the GPU
-would refuse to run. Nor does the problem need a multi-architecture build: an
-ordinary `nvcc -arch=sm_89 -c` already emits a container whose PTX entry cannot
-run, and `cuobjdump` lists it without comment. Full table in
-[divergence-matrix](analysis/divergence-matrix.md).
+Knowing the rule is what closes the gap. A tool that reproduces the driver's
+precedence can point at the entry that will actually execute, hash that one,
+disassemble that one, and say plainly when a container has no runnable entry at
+all. That is what `would_execute()` does, and
+[divergence-matrix](analysis/divergence-matrix.md) is how it was checked: 29
+containers built to put the rules in conflict, each loaded on a real GPU, with
+the rule agreeing with hardware on every one.
 
 ## What the parser adds
 

@@ -15,6 +15,11 @@ from the bytes alone.
 
 ## The readings being compared
 
+These three are not measurements of any shipping product. They are the
+plausible ways a tool could choose an entry, written here so the driver's rule
+has something to be compared against. What the comparison establishes is where
+each shortcut breaks, not how any particular scanner behaves.
+
 | How a tool picks the entry to inspect | What it does | Why a tool would do this |
 |---|---|---|
 | first-match | first entry whose architecture does not exceed the GPU | the obvious loop, and what a linear scan gives you |

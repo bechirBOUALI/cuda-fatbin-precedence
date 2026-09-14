@@ -210,9 +210,10 @@ build-specific. The full decompilation is in
 
 ## What a static reading gets wrong
 
-Twenty-nine containers, each one loaded on the GPU so that what executed is
-measured rather than predicted, compared against three conventional static
-readings.
+The three readings below are not measurements of any shipping product. They are
+the plausible ways a tool could choose an entry, written so the driver's rule
+has something to be compared against. Twenty-nine containers, each one loaded on
+the GPU so that what executed is measured rather than predicted.
 
 | How a tool picks the entry to inspect | Names an entry that did not run |
 |---|---|
