@@ -214,10 +214,10 @@ Twenty-nine containers, each one loaded on the GPU so that what executed is
 measured rather than predicted, compared against three conventional static
 readings.
 
-| reading | wrong on |
+| How a tool picks the entry to inspect | Names an entry that did not run |
 |---|---|
-| first-match, first entry not exceeding the GPU | 15 of 29 |
-| exact-arch, first entry matching the GPU exactly | 15 of 29 |
+| first-match, the first entry the GPU could run | 15 of 29 |
+| exact-arch, the first exact architecture match | 15 of 29 |
 | prefer-PTX, read the text because it is text | 16 of 29 |
 | precedence-aware, the rule above | 0 of 29 |
 
@@ -225,11 +225,17 @@ The full matrix, row by row with what each row establishes, is in
 `analysis/divergence-matrix.md`.
 
 The obvious objection is that these containers were built to conflict. So the
-same comparison was run against every fat binary in the CUDA toolkit's own
-shipped libraries, which nobody here built or tampered with. 343 containers
-across 14 libraries, of which 339 hold more than one entry:
+same readings were run against every fat binary in the CUDA toolkit's own
+shipped libraries, which nobody here built or tampered with: 343 containers
+across 14 libraries, of which 339 hold more than one entry.
 
-| reading | wrong on |
+The evidence here is one step weaker, and the distinction is worth keeping.
+Those libraries carry no marker to read back, so nothing can be loaded and
+observed; each reading is compared against the precedence-aware rule rather
+than against hardware. That rule is not assumed correct, it is what the table
+above establishes, agreeing with the GPU on all 29 built containers.
+
+| How a tool picks the entry to inspect | Disagrees with the driver's rule |
 |---|---|
 | first-match | 342 of 343 |
 | exact-arch | 195 of 343 |

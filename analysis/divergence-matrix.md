@@ -15,7 +15,7 @@ from the bytes alone.
 
 ## The readings being compared
 
-| reading | what it does | why a tool would do this |
+| How a tool picks the entry to inspect | What it does | Why a tool would do this |
 |---|---|---|
 | first-match | first entry whose architecture does not exceed the GPU | the obvious loop, and what a linear scan gives you |
 | exact-arch | first entry whose architecture equals the GPU exactly, else first-match | the careful version, and correct on most shipped libraries |
