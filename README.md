@@ -94,6 +94,21 @@ all. That is what `would_execute()` does, and
 containers built to put the rules in conflict, each loaded on a real GPU, with
 the rule agreeing with hardware on every one.
 
+## Where this shows up
+
+Running models locally is ordinary now, and the weights are the safe part: a
+safetensors or GGUF file is data, and loading it executes no device code. What
+executes is everything around it. The packages that run the model ship compiled
+GPU code inside their wheels, and `trust_remote_code=True` lets a model
+repository build and load its own. That is a supply chain where the realistic
+attacker is one who can ship a binary, and it is the threat model these
+findings sit in.
+
+Nothing here is an attack on that supply chain, and none was demonstrated. The
+point is narrower: anything built to scan, hash or attest GPU code has to
+answer which entry actually runs before it can claim to have looked at the
+code.
+
 ## What the parser adds
 
 `scripts/fatbin_parser.py` answers the question the format does not: for each
