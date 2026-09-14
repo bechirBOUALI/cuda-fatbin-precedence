@@ -446,6 +446,9 @@
   document.querySelectorAll(".preset[data-preset]").forEach(function(b){
     b.onclick=function(){load(b.getAttribute("data-preset"));};
   });
+  var q=new URLSearchParams(location.search);
+  var th=q.get("theme");
+  if(th==="dark"||th==="light") document.documentElement.setAttribute("data-theme",th);
   document.getElementById("forcejit").onchange=function(){clearPreset();render();};
 
   load("cubin-beats-ptx");

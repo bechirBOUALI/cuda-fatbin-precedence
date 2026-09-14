@@ -504,6 +504,9 @@
 
   var q=new URLSearchParams(location.search);
   if(q.get("embed")==="1") document.body.classList.add("embed");
+  // ?theme=dark|light pins the palette, which is how the repository GIF is rendered
+  var th=q.get("theme");
+  if(th==="dark"||th==="light") document.documentElement.setAttribute("data-theme",th);
 
   if(q.has("step")){
     // one fixed frame, no motion: how the GIF frames are captured
