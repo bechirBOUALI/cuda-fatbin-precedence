@@ -62,6 +62,30 @@ transforms it. Applying both to a **cubin** entry leaves flags at `0x11` and
 changes nothing, which matches the feature being named for PTX and TileIR
 rather than for compiled binaries.
 
+## The key is stored in the container
+
+This is the part that undercuts the feature. The 8-byte field at entry+0x30,
+which is zero in every ordinary build and which format notes usually call
+reserved, holds the key. It is encoded as BCD: the decimal digits of the value
+given to `--okey`, read as hex nibbles, little-endian.
+
+| `--okey` | field at entry+0x30 |
+|---|---|
+| 99 | `0x99` |
+| 100 | `0x100` |
+| 12345 | `0x12345` |
+| 65535 | `0x65535` |
+| 1000000 | `0x1000000` |
+
+So the entry header is not "reserved" there, and a reader holding only the file
+holds the key as well. What that means for the strength of the scheme is being
+checked separately; it may be that the value is an identifier rather than the
+secret, or that the transform is reversible from it. Either way the field
+should be recorded as the key and not as padding.
+
+Very large values are refused by `fatbinary`; 987654321 and 4294967295 both
+fail to build.
+
 ## What each side can see
 
 For an obfuscated entry, with no key supplied:
@@ -83,11 +107,13 @@ The entry's **metadata is fully readable** while its **code is not**. A tool
 sees an entry for sm_89 at PTX ISA 9.2 and cannot see a single instruction of
 it.
 
-The driver is in the same position without the key: loading that container
-returns `CUDA_ERROR_INVALID_PTX`. There is no obfuscation-key option in
-`cuda.h`, and the driver carries no deobfuscation strings beyond the two
-labels, so the key evidently reaches the JIT by some path an ordinary
-application supplies rather than being embedded in the container.
+The driver refuses it too: loading that container returns
+`CUDA_ERROR_INVALID_PTX`. That is the puzzle this leaves. The key is sitting in
+the entry header, so the driver has everything the format gives it and still
+declines, and there is no obfuscation-key option in `cuda.h` for an application
+to supply one another way. Either the driver does not implement the reverse
+transform at all, or something beyond the key is required. Which of those it is
+has not been established here.
 
 ## Why it matters here
 
@@ -106,6 +132,9 @@ mistake for an entry that simply has no PTX.
 
 ## Open
 
-What `state+0x98` is and how the key reaches the driver. The two log labels
-suggest TileIR gets the same treatment as PTX, but no TileIR sample could be
-produced with this toolkit, so that is unconfirmed.
+Given that the key sits in the file, what the obfuscation actually protects,
+and whether the embedded value is the secret or merely names one. Why the
+driver refuses an obfuscated entry when the key is right there in the
+container. What `state+0x98` is. And whether TileIR is treated the same as PTX,
+which the second log label suggests but which no sample could confirm, since
+this toolkit would not emit TileIR.

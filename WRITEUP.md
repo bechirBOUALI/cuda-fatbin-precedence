@@ -295,7 +295,9 @@ The toolkit ships a keyed obfuscation feature, and the driver carries its two
 labels, `PTX Obfuscation` and `TileIR Obfuscation`, in the container walk.
 `fatbinary --okey=<n> -reorder-obfuscation` transforms a PTX payload and sets
 bit 16 of the entry flags. The entry keeps its kind, and the container keeps
-correct architecture, ISA version and size.
+correct architecture, ISA version and size. The key itself is stored in the
+entry header, in the eight bytes at offset 0x30 that are zero in ordinary
+builds, encoded as the decimal digits of the key read as hex nibbles.
 
 What changes is readability. `cuobjdump` reports the entry's metadata in full
 and then says it cannot deobfuscate the entry without the key, followed by "No

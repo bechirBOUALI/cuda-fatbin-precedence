@@ -159,6 +159,9 @@ class FatBinEntryHeader(ctypes.LittleEndianStructure):
       arch                  89 for sm_89
       ident_offset/length   built with --ident=IDENTMARKER99, length 13
       flags                 bit 0x8000 tracks --compress
+      obfuscation_key       carries the value of fatbinary --okey, so it is
+                            not a reserved field despite reading zero in
+                            every ordinary build
       decompressed_size     equals the byte count zstd actually produced
     """
 
@@ -176,7 +179,7 @@ class FatBinEntryHeader(ctypes.LittleEndianStructure):
         ("ident_offset",      ctypes.c_uint32),   # 0x20, from entry start
         ("ident_length",      ctypes.c_uint32),   # 0x24
         ("flags",             ctypes.c_uint64),   # 0x28
-        ("reserved",          ctypes.c_uint64),   # 0x30, zero in every sample
+        ("obfuscation_key",   ctypes.c_uint64),   # 0x30, 0 unless a key was set
         ("decompressed_size", ctypes.c_uint64),   # 0x38
     ]
 
@@ -198,6 +201,10 @@ class Entry:
         self.kind_name = KIND_NAMES.get(hdr.kind, f"unknown_{hdr.kind:#x}")
         self.compressed = bool(hdr.flags & FLAG_COMPRESSED)
         self.obfuscated = bool(hdr.flags & FLAG_OBFUSCATED)
+        # The key is stored as BCD: the decimal digits of the value supplied to
+        # fatbinary --okey, read as hex nibbles. 12345 is stored as 0x12345.
+        self.obfuscation_key = (f"{hdr.obfuscation_key:x}"
+                                if hdr.obfuscation_key else None)
         self.arch_suffix = ("a" if hdr.flags & FLAG_ARCH_SUFFIX_A
                             else "f" if hdr.flags & FLAG_ARCH_SUFFIX_F
                             else "")
@@ -655,6 +662,7 @@ def describe(path, sm, policy, suffix=""):
                 "flags": f"{e.flags:#x}",
                 "arch_suffix": e.arch_suffix,
                 "obfuscated": e.obfuscated,
+                "obfuscation_key": e.obfuscation_key,
                 "elf_arch": e.elf_arch,
                 "deprioritised": e.deprioritised,
                 "identifier": e.ident,
@@ -686,6 +694,9 @@ def print_report(containers):
                 print(f"       identifier: {e['identifier']}")
             if e["ptxas_options"]:
                 print(f"       ptxas options: {e['ptxas_options']}")
+            if e["obfuscation_key"]:
+                print(f"       obfuscation key: {e['obfuscation_key']} "
+                      f"(stored in the container)")
             for n in e["notes"]:
                 print(f"       note: {n}")
         if c["would_execute"] is None:
