@@ -44,17 +44,29 @@ ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 # than guessed at.
 KIND_PTX       = 0x01
 KIND_ELF       = 0x02
+KIND_CUBIN     = 0x04
 KIND_LTO_IR    = 0x08
+KIND_MERCURY   = 0x10
+KIND_INDEX     = 0x20
 KIND_RELOC_PTX = 0x40
+KIND_TILEIR    = 0x80
+KIND_CONCAT    = 0x100
+
+# Names as cuobjdump itself prints them, read out of its kind-to-name switch:
+# the comparisons live at 0x2a895 onward in the CUDA 13.2 build, and 0x100's
+# label carries NVIDIA's own spelling. cuobjdump has no case for 0x10 and
+# prints "<unknown kind>" for it, so the name used here is descriptive rather
+# than NVIDIA's; see analysis/fatbin-entry-kinds.md.
 KIND_NAMES = {
     KIND_PTX:       "PTX",
     KIND_ELF:       "ELF",
-    KIND_LTO_IR:    "LTO_IR",
+    KIND_CUBIN:     "CUBIN",
+    KIND_LTO_IR:    "NVVM",
+    KIND_MERCURY:   "MERCURY?",
+    KIND_INDEX:     "INDEX",
     KIND_RELOC_PTX: "RELOC_PTX",
-    0x10:           "kind_0x10",
-    0x20:           "kind_0x20",
-    0x80:           "kind_0x80",
-    0x100:          "GROUP",
+    KIND_TILEIR:    "TILEIR",
+    KIND_CONCAT:    "CONCAT",
 }
 
 # The driver ranks candidate entries by kind before it considers anything else.

@@ -302,8 +302,10 @@ builds, encoded as the decimal digits of the key read as hex nibbles.
 What changes is readability. `cuobjdump` reports the entry's metadata in full
 and then says it cannot deobfuscate the entry without the key, followed by "No
 PTX file found to extract", which is easy to read as an entry that simply has
-no PTX. The driver is no better off: without the key it returns
-`CUDA_ERROR_INVALID_PTX`.
+no PTX. The driver returns `CUDA_ERROR_INVALID_PTX`, and its own logging says
+why: the two strings in the walk are arguments to "Feature: '%s' not yet
+implemented", so this driver recognises obfuscated payloads and does not
+implement them.
 
 This is an intellectual-property feature rather than a defect, and it is worth
 naming because it is the limit case of everything above. Elsewhere the problem
@@ -388,9 +390,9 @@ Where it matters is an attacker who can ship a binary, which is the real supply
 chain for ML wheels and container images. It is not remote code execution.
 Every payload here writes a marker value and nothing else.
 
-Open items: kinds 0x10, 0x20 and 0x80 appear in the driver's code and could
-not be produced with the toolkit's creation API, so their meaning is unknown;
-kind 0x100 is a group entry NVIDIA's header says cannot currently be created;
+Open items: kind 0x10 is an ELF the driver finalizes before load, on the
+evidence of a handler whose whole error vocabulary is NVIDIA's Mercury
+finalizer, but NVIDIA names it nowhere and that reading is an inference;
 several of the selector's policy values are visible in the jump table but
 unidentified; and two conflict cases remain untested, a payload hidden
 in the slack when the declared payload size exceeds the real one, and an entry

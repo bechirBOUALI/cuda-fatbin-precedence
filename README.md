@@ -45,6 +45,11 @@ None of this needs a crafted file. An ordinary `nvcc -arch=sm_89 -c` already
 emits a container whose PTX entry cannot run, and `cuobjdump` lists it without
 comment.
 
+Entry kinds are named as `cuobjdump`'s own kind-to-name switch prints them:
+1 = ptx, 2 = elf, 4 = cubin, 8 = nvvm, 0x20 = index, 0x40 = relocatable ptx,
+0x80 = tile ir, 0x100 = "contatenated entry", NVIDIA's spelling. It has no case
+for 0x10 and calls that one `<unknown kind>`.
+
 Two further results. Bits 20 and 21 of an entry's `flags` field are the
 architecture-name suffix, `a` and `f`, so an entry can declare `sm_89a` while
 `cuobjdump -lelf` lists it as plain `sm_89` and disassembles it in full; no GPU

@@ -13,12 +13,12 @@ statically.
 | H100 driver 610.57.04 | the same two strings, at file offsets `0x67cbe48` and `0x67cbe58` |
 | `nvlink` | both strings, alongside `NVVM` and `Error reading obfuscated PTX file` |
 
-In the driver both are passed as the second argument to the function at
+In the driver both are passed as the second argument to the varargs logger at
 `0x490490`, from three sites inside the container walk: `0x47b20e`, `0x47bcc7`
-and `0x47bebd`. That function is a varargs logger, `f(channel*, fmt, ...)`,
-recognisable from its register-save prologue and from reading a level and an
-enabled flag out of the struct it is handed. So the strings are log labels, not
-data the parser acts on.
+and `0x47bebd`. The first argument is a descriptor carrying the format string,
+which turns out to be "Feature: '%s' not yet implemented", so these two strings
+are feature names substituted into that message rather than messages in their
+own right. The evidence is below, under what each side can see.
 
 The path is guarded. At `0x47b120` the driver tests a pointer at `state+0x98`
 and only takes the logging branch when it is non-null, so an obfuscation
@@ -78,10 +78,10 @@ given to `--okey`, read as hex nibbles, little-endian.
 | 1000000 | `0x1000000` |
 
 So the entry header is not "reserved" there, and a reader holding only the file
-holds the key as well. What that means for the strength of the scheme is being
-checked separately; it may be that the value is an identifier rather than the
-secret, or that the transform is reversible from it. Either way the field
-should be recorded as the key and not as padding.
+holds the key as well. Whether that is sufficient to reverse the transform, or
+whether the value only identifies a secret held elsewhere, is still being
+checked. Either way the field should be recorded as the key and not as
+padding.
 
 Very large values are refused by `fatbinary`; 987654321 and 4294967295 both
 fail to build.
@@ -107,13 +107,27 @@ The entry's **metadata is fully readable** while its **code is not**. A tool
 sees an entry for sm_89 at PTX ISA 9.2 and cannot see a single instruction of
 it.
 
-The driver refuses it too: loading that container returns
-`CUDA_ERROR_INVALID_PTX`. That is the puzzle this leaves. The key is sitting in
-the entry header, so the driver has everything the format gives it and still
-declines, and there is no obfuscation-key option in `cuda.h` for an application
-to supply one another way. Either the driver does not implement the reverse
-transform at all, or something beyond the key is required. Which of those it is
-has not been established here.
+The driver refuses it too, and it says why. Loading the container returns
+`CUDA_ERROR_INVALID_PTX`, and the two strings in the walk are not labels after
+all: they are the `%s` argument to one message. The descriptor they are passed
+with, at `0x181a210`, is filled in by a relocation:
+
+```
+readelf -rW libcuda.so.1.1
+000000000181a218  R_X86_64_RELATIVE  150fb18
+000000000150fb18  "Feature: '%s' not yet implemented"
+```
+
+So the driver logs **"Feature: 'PTX Obfuscation' not yet implemented"**. It
+recognises an obfuscated entry, and declines to handle it. The refusal is not a
+missing key; the reverse transform is simply not implemented in this driver.
+Two neighbouring strings round out the picture: "Can't load this binary kind,
+as it's not recognized" and "Can't JIT TileIR without libtileiras".
+
+This corrects an earlier reading in this note, which took `0x490490` to be a
+generic logger and the two strings to be its format arguments. The function is
+a logger, but the format lives in the descriptor and the strings are the
+feature names substituted into it.
 
 ## Why it matters here
 
@@ -133,8 +147,10 @@ mistake for an entry that simply has no PTX.
 ## Open
 
 Given that the key sits in the file, what the obfuscation actually protects,
-and whether the embedded value is the secret or merely names one. Why the
-driver refuses an obfuscated entry when the key is right there in the
-container. What `state+0x98` is. And whether TileIR is treated the same as PTX,
-which the second log label suggests but which no sample could confirm, since
-this toolkit would not emit TileIR.
+and whether the embedded value is the secret or merely names one. What
+`state+0x98` is. And whether TileIR is obfuscated the same way as PTX, which
+the second feature name implies but which no sample could confirm, since this
+toolkit would not emit TileIR.
+
+Settled since this note was written: the driver refuses obfuscated entries
+because the feature is unimplemented there, not because it lacks the key.
