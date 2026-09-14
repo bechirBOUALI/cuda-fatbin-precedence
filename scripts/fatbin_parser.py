@@ -5,10 +5,11 @@ Reads a fat binary, or a host ELF that embeds one, and reports for each entry
 what it is and, crucially, WHETHER THE DRIVER WOULD EXECUTE IT.
 
 That last column is the point of this tool. A fat binary can hold several
-entries that match the running GPU, and the driver picks exactly one. The rule
-it uses is undocumented and is not "the first matching entry", so a tool that
-inspects, hashes, or attests the wrong entry is describing code the hardware
-never runs. The rule implemented in `would_execute` was measured black-box and
+entries that match the running GPU, and the driver picks exactly one. NVIDIA
+documents only the coarse part of how it chooses, that a compatible cubin beats
+PTX, and leaves the ranking among several matching candidates unstated. The
+full rule is not "the first matching entry", so a tool that inspects, hashes or
+attests the wrong entry is describing code the hardware never runs. The rule implemented in `would_execute` was measured black-box and
 then confirmed against the driver's own code; see
 `analysis/step1-entry-precedence.md` and `analysis/driver-selection-logic.md`.
 

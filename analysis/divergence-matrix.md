@@ -2,6 +2,12 @@
 
 Measured 2026-09-12, driver 597.06, RTX 2000 Ada (sm_89), CUDA 13.2, WSL2.
 
+Scope note added 2026-09-14. NVIDIA documents that a compatible cubin is
+preferred over PTX, so rows where that alone decides the outcome confirm the
+documented rule rather than extending it. The rows that matter for this
+document are the ones where several entries all match and something has to rank
+them, which is what is not documented.
+
 What a static reading of a fat binary reports, against what the GPU actually
 ran. The driver column is ground truth: each container was loaded and the
 marker its kernel wrote was read back. Every other column is a prediction made

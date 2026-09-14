@@ -1,9 +1,11 @@
 # CUDA fat binary entry precedence
 
 When a CUDA fat binary contains more than one entry matching the running GPU,
-which one actually executes? The container format is documented in places, the
-precedence rule is documented nowhere, and the answer decides whether a tool
-inspecting GPU code is looking at the code that runs.
+which one actually executes? NVIDIA documents the coarse rule, that a
+compatible cubin is preferred over PTX, and then stops: the runtime is said to
+find the "best matching" entry, with no statement of what breaks a tie between
+entries that match equally well. That gap decides whether a tool inspecting GPU
+code is looking at the code that runs.
 
 This repository measures the rule, confirms it against the driver's own code,
 and implements it.
@@ -13,8 +15,9 @@ in about 2600 words, with the decompiled C for the selection path.
 
 ## The rule, in short
 
-Selection is a three-level hierarchy, each level consulted only when the one
-above it ties.
+Selection is a hierarchy, each level consulted only when the one above it ties.
+The first two levels restate what NVIDIA documents; the ones below them are the
+part that is not written down.
 
 | Level | Rule |
 |---|---|
@@ -61,8 +64,9 @@ nothing validates entry contents.
 ```
 WRITEUP.md   the argument, start here
 analysis/    dated working notes, including measurements later corrected,
-             the divergence matrix, and the driver reverse engineering as both
-             disassembly and decompiled C
+             the divergence matrix, the driver reverse engineering as both
+             disassembly and decompiled C, and what was already documented
+             or published before this work
 scripts/     the parser, the divergence matrix, the shipped-library survey
 src/         test kernels and a minimal Driver API loader
 probes/      small programs that identify entry kinds via libnvfatbin

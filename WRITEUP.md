@@ -5,10 +5,19 @@ device code, one per GPU architecture the build targeted, plus optionally PTX
 for architectures that did not exist yet. At load time the driver picks one and
 runs it.
 
-Write-ups of the format document the layout well: the wrapper, the header, the
-entry array, the compressed payloads. What none of them document is the part
-that matters if you are inspecting GPU code rather than producing it. When more
-than one entry matches the running GPU, which one executes?
+NVIDIA documents the coarse rule, and it is worth stating plainly because the
+rest of this builds on it rather than overturning it. The Ampere compatibility
+guide says that "if a cubin compatible with that GPU is present in the binary,
+the cubin is used as-is for execution", otherwise the PTX is compiled at load
+time. So a compatible cubin beats PTX. That much is settled.
+
+What is not documented is what happens when that leaves more than one
+candidate. The same guide says the runtime "uses this information to find the
+best matching cubin or PTX version" and never says what "best matching" means.
+There is no statement of how a nearer architecture ranks against a further one,
+what breaks a tie between two entries that match equally well, or whether
+position in the file matters. Those are the questions a tool has to answer to
+know which entry runs.
 
 Any tool that reads device code out of a binary, to disassemble it, hash it,
 attest it, or decide whether it is safe, has to choose an entry. If its rule
@@ -18,6 +27,32 @@ wrong.
 
 This is a measurement of that rule, a confirmation of it against the driver's
 own code, and a parser that implements it.
+
+## What was already known
+
+Worth separating, so the new part is visible. Already documented by NVIDIA: a
+compatible cubin is preferred over PTX; `CUDA_FORCE_PTX_JIT=1` ignores embedded
+binary code and compiles the PTX instead; the `a` and `f` target suffixes,
+`sm_90a` and `sm_100f`, and their compatibility semantics at the `nvcc` level;
+and that the fat binary creation library enforces "only one entry per sm of
+each unique identifier", which is why the conflicting containers below have to
+be built deliberately.
+
+Already reverse engineered publicly: the container layout, the wrapper, the
+entry array and the entry header, most recently and most thoroughly in
+Stealthium's write-up of the format, which names a `bin_info` bitfield carrying
+platform, debug and compression bits but does not identify the selection bits
+below. Several open-source parsers enumerate entries; none of them models which
+entry the driver would pick.
+
+New here, as far as I can establish, with the sources checked and listed in
+`analysis/prior-art.md`: the ranking among candidates that all
+match, which is the hierarchy below levels 0 and 1; the tie-break on flag bit
+24; the file-order tie-break and the fact that its direction reverses between
+cubin and PTX; the encoding of the `a` and `f` suffixes in two bits of the
+entry flags, which is the container-level counterpart of a documented `nvcc`
+feature; and the measurement of how far a conventional static reading lands
+from what the GPU runs, on shipped libraries as well as on built cases.
 
 ## The rule
 
@@ -43,13 +78,15 @@ Every line of that was measured by loading containers built to conflict and
 reading back which kernel ran. Two kernels export the same symbol and differ
 only in a marker they write, so the marker names the entry the driver chose.
 
-Three consequences are worth stating separately, because each one breaks a
-different reasonable-looking implementation.
+Levels 0 and 1 restate the documented rule and the measurements confirm it.
+Everything below them is the part that was not written down, and three
+consequences are worth stating separately, because each one breaks a different
+reasonable-looking implementation.
 
-**A PTX entry is unreachable whenever a cubin for the same architecture is
-present.** Kind decides first, so no amount of architectural precision saves
-the PTX. An sm_86 cubin beats an exactly matching compute_89 PTX on an sm_89
-GPU. Nothing in the PTX says it is dead, and `cuobjdump` lists it alongside the
+**A PTX entry is unreachable whenever a compatible cubin is present**, which
+follows from the documented rule but is sharper than it sounds. Kind is decided
+before architecture, so no amount of architectural precision saves the PTX: an
+sm_86 cubin beats an exactly matching compute_89 PTX on an sm_89 GPU. Nothing in the PTX says it is dead, and `cuobjdump` lists it alongside the
 cubin without comment. PTX is the tempting thing to analyse, because it is text
 and the alternative needs a disassembler, and it is the thing least likely to
 run.
