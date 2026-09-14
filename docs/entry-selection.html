@@ -1,0 +1,524 @@
+<title>How One Kernel Gets Chosen</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400&display=swap">
+<style>
+  :root{
+    --ground:#faf8f4; --surface:#fffefb; --sunk:#f1eee7;
+    --ink:#1d1b17; --ink-2:#4c4740; --ink-3:#847d72;
+    --rule:#ded8cd; --rule-2:#c8c0b1;
+    --signal:#2d7a4e; --signal-ink:#f7fdf9; --signal-soft:#dbefe1;
+    --read:#43607f; --read-soft:#dde7f1;
+    --dead:#b3aca1;
+    --drop:#b03a28; --drop-soft:#f7e0da;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"Archivo",system-ui,-apple-system,sans-serif;
+    --serif:"Source Serif 4",Georgia,serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#17161a; --surface:#201f25; --sunk:#141317;
+      --ink:#efece6; --ink-2:#b8b2a8; --ink-3:#8a8479;
+      --rule:#34323b; --rule-2:#4a4751;
+      --signal:#6ec98d; --signal-ink:#0d2116; --signal-soft:#1e3a29;
+      --read:#93b4da; --read-soft:#1f2a38;
+      --dead:#5f5b54;
+      --drop:#ef8b72; --drop-soft:#3a221c;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#17161a; --surface:#201f25; --sunk:#141317;
+    --ink:#efece6; --ink-2:#b8b2a8; --ink-3:#8a8479;
+    --rule:#34323b; --rule-2:#4a4751;
+    --signal:#6ec98d; --signal-ink:#0d2116; --signal-soft:#1e3a29;
+    --read:#93b4da; --read-soft:#1f2a38;
+    --dead:#5f5b54;
+    --drop:#ef8b72; --drop-soft:#3a221c;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground); color:var(--ink); font-family:var(--serif);
+    font-size:16px; line-height:1.6; margin:0;
+    padding-block:36px; padding-left:20px; padding-right:20px;
+  }
+  .wrap{max-width:1000px; margin:0 auto; display:flex; flex-direction:column; gap:26px}
+  h1{font-family:var(--sans); font-weight:700; font-size:clamp(26px,4.6vw,38px);
+     letter-spacing:-.02em; line-height:1.12; margin:0; text-wrap:balance}
+  .lede{font-size:17px; color:var(--ink-2); margin:10px 0 0; max-width:64ch}
+
+  .scroller{overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch}
+  .stage-svg{width:100%; height:auto; display:block; min-width:700px}
+  .scroll-hint{font-size:13px; color:var(--ink-3); margin:6px 0 0; display:none}
+  @media(max-width:740px){ .scroll-hint{display:block} }
+
+  .key{display:flex; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--ink-3); margin:0}
+  .key b{font-weight:600}
+  .key i{display:inline-block; width:10px; height:10px; border-radius:2px;
+         margin-right:6px; vertical-align:baseline}
+  .k-read{background:var(--read)} .k-drop{background:var(--drop)} .k-sig{background:var(--signal)}
+
+  /* diagram tokens */
+  .box{fill:var(--surface); stroke:var(--rule-2); stroke-width:1.5}
+  .box-sunk{fill:var(--sunk); stroke:var(--rule); stroke-width:1.5}
+  .lbl{font-family:var(--mono); font-size:11px; fill:var(--ink-2)}
+  .lbl-dim{font-family:var(--mono); font-size:10px; fill:var(--ink-3)}
+  .lbl-hd{font-family:var(--sans); font-size:11px; font-weight:600; fill:var(--ink-3); letter-spacing:.08em}
+  .flow{stroke:var(--rule-2); stroke-width:2; fill:none}
+
+  .zone{transition:opacity .35s ease}
+  .zone.idle{opacity:.4}
+  .zone.hot .box{stroke:var(--read); stroke-width:2.5}
+  .zone.hot .lbl-hd{fill:var(--read)}
+
+  .row rect.card{fill:var(--surface); stroke:var(--rule-2); stroke-width:1.5; transition:fill .55s ease,stroke .55s ease,opacity .55s ease}
+  .row text{transition:fill .55s ease,opacity .55s ease}
+  .row .chip{fill:var(--sunk); stroke:var(--rule-2); stroke-width:1; transition:fill .3s ease,stroke .3s ease}
+  .row .chip-t{font-family:var(--mono); font-size:9.5px; fill:var(--ink-3); transition:fill .3s ease}
+
+  .row.dead rect.card{stroke:var(--rule); fill:var(--sunk)}
+  .row.dead text{fill:var(--dead)}
+  .row.dead .chip{stroke:var(--rule); fill:var(--sunk)}
+  .row.dead .chip-t{fill:var(--dead)}
+
+  .row.win rect.card{fill:var(--signal-soft); stroke:var(--signal); stroke-width:2.5}
+  .row.win .name{fill:var(--signal)}
+
+  .row .bitset .chip{fill:var(--read-soft); stroke:var(--read)}
+  .row .bitset .chip-t{fill:var(--read)}
+  .row.dead .bitset .chip{fill:var(--sunk); stroke:var(--rule)}
+  .row.dead .bitset .chip-t{fill:var(--dead)}
+
+  .row .why{opacity:0; font-family:var(--sans); font-size:10.5px; font-weight:600; fill:var(--dead)}
+  .row.dead .why{opacity:1; fill:var(--drop)}
+  .row.win .why{opacity:1; fill:var(--signal)}
+
+  /* the field that actually caused the drop */
+  .cul-bg{fill:var(--drop-soft); stroke:var(--drop); stroke-width:1.5; rx:3;
+          opacity:0; transition:opacity .5s ease}
+  .row.dead .cul-bg,.row.dropping .cul-bg{opacity:1}
+  .row.dead .culprit,.row.dropping .culprit{fill:var(--drop); font-weight:700}
+  .row.dropping .cul-bg{stroke-width:2.5}
+  .row.dropping .culprit{font-weight:700}
+  .row.dropping rect.card{stroke:var(--drop)}
+  .row.dropping .bitset .chip{fill:var(--drop-soft); stroke:var(--drop)}
+  .row.dropping .bitset .chip-t,.row.dead .bitset .chip-t{fill:var(--drop)}
+  .row.dead .bitset .chip{fill:var(--drop-soft); stroke:var(--drop)}
+
+  /* a red cross beside the offending field: this entry is out */
+  .xmark{opacity:0; transition:opacity .5s ease}
+  .xmark line{stroke:var(--drop); stroke-width:2.6; stroke-linecap:round}
+  .row.dead .xmark,.row.dropping .xmark{opacity:1}
+
+  .gate rect.g{fill:var(--surface); stroke:var(--rule-2); stroke-width:1.5;
+               transition:fill .3s ease,stroke .3s ease}
+  .gate text{transition:fill .3s ease}
+  .gate .g-n{font-family:var(--mono); font-size:9px; fill:var(--ink-3)}
+  .gate .g-name{font-family:var(--sans); font-size:10px; font-weight:600; fill:var(--ink-2)}
+  .gate .g-left{font-family:var(--mono); font-size:13px; font-weight:700; fill:var(--ink-3)}
+  .gate.future rect.g{fill:var(--sunk); stroke:var(--rule)}
+  .gate.future .g-name,.gate.future .g-n{fill:var(--dead)}
+  .gate.future .g-left{fill:var(--dead)}
+  .gate.done .g-left{fill:var(--ink-2)}
+  .gate.active rect.g{fill:var(--read-soft); stroke:var(--read); stroke-width:2.5}
+  .gate.active .g-name,.gate.active .g-n,.gate.active .g-left{fill:var(--read)}
+  .gate.final rect.g{fill:var(--signal-soft); stroke:var(--signal); stroke-width:2.5}
+  .gate.final .g-name,.gate.final .g-n,.gate.final .g-left{fill:var(--signal)}
+  .gwire{stroke:var(--rule-2); stroke-width:1.5; fill:none; transition:stroke .3s ease}
+  .gwire.lit{stroke:var(--read)}
+
+  .pulse{stroke:var(--drop); stroke-width:3; fill:none; opacity:0}
+  .pulse.on{opacity:1}
+  @media(prefers-reduced-motion:no-preference){
+    .pulse.on{animation:ring 1.4s ease-out infinite}
+    @keyframes ring{0%{opacity:.95;stroke-width:3}70%{opacity:0;stroke-width:10}100%{opacity:0}}
+  }
+
+  .spark{fill:var(--signal); opacity:0; transition:opacity .3s ease}
+  .spark.on{opacity:1}
+  .zone.gpu-live rect.box{stroke:var(--signal); stroke-width:2.5}
+  .zone.gpu-live .lbl-hd{fill:var(--signal)}
+
+  .carrier{opacity:0; transition:opacity .25s ease}
+  .carrier.on{opacity:1}
+
+  /* narration */
+  .narr{border:1px solid var(--rule); border-radius:6px; background:var(--surface);
+        padding:14px 16px; display:flex; gap:14px; align-items:flex-start; min-height:74px}
+  .step-no{font-family:var(--mono); font-size:11px; font-weight:700; color:var(--signal-ink);
+           background:var(--signal); border-radius:3px; padding:3px 7px; flex:none; letter-spacing:.04em}
+  .narr-b{display:flex; flex-direction:column; gap:2px}
+  .narr-t{font-family:var(--sans); font-weight:600; font-size:15px}
+  .narr-d{font-size:14.5px; color:var(--ink-2); max-width:74ch}
+
+  .rail{display:flex; gap:6px; align-items:center; flex-wrap:wrap}
+  .tick{width:26px; height:5px; border-radius:3px; background:var(--rule-2); border:none;
+        padding:0; cursor:pointer; transition:background-color .25s ease}
+  .tick[aria-current="true"]{background:var(--signal)}
+  .tick.done{background:var(--ink-3)}
+  .tick:focus-visible,.ctl:focus-visible{outline:2px solid var(--signal); outline-offset:3px}
+  .bar{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+  .ctl{font-family:var(--sans); font-size:12.5px; font-weight:600; cursor:pointer;
+       padding:6px 12px; border-radius:4px; color:var(--ink-2);
+       background:var(--surface); border:1px solid var(--rule-2)}
+  .ctl:hover{border-color:var(--ink-3); color:var(--ink)}
+  .foot{font-size:14px; color:var(--ink-3); border-top:1px solid var(--rule); padding-top:14px; max-width:74ch}
+
+  /* frame-capture mode, used to render the animated GIF for the repository */
+  body.embed{padding-block:18px}
+  body.embed header,body.embed .bar,body.embed .foot,body.embed .scroll-hint{display:none}
+  body.embed .wrap{gap:16px}
+  body.embed .stage-svg{min-width:0}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>How one kernel gets chosen</h1>
+    <p class="lede">A fat binary carrying six compiled forms of the same kernel arrives at the
+    driver. Five of them are dead code before the GPU sees anything. Here is which field
+    kills each one.</p>
+  </header>
+
+  <div class="scroller">
+  <svg class="stage-svg" viewBox="0 0 960 540" role="img"
+       aria-label="A fat binary enters the CUDA driver, which walks its six entries and crosses out five in turn by compatibility, kind, architecture, flag bit 24 and file order, then loads the surviving cubin onto the GPU.">
+    <defs>
+      <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <polygon points="0,1 9,5 0,9" fill="var(--rule-2)"/>
+      </marker>
+      <marker id="tipHot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <polygon points="0,1 9,5 0,9" fill="var(--signal)"/>
+      </marker>
+    </defs>
+
+    <!-- incoming fat binary -->
+    <g class="zone" id="z-file">
+      <text x="14" y="222" class="lbl-hd">FAT BINARY</text>
+      <rect class="box" x="14" y="232" width="112" height="74" rx="4"/>
+      <line class="flow" x1="26" y1="254" x2="114" y2="254"/>
+      <line class="flow" x1="26" y1="269" x2="114" y2="269"/>
+      <line class="flow" x1="26" y1="284" x2="114" y2="284"/>
+      <text x="70" y="322" text-anchor="middle" class="lbl-dim">6 entries</text>
+      <line class="flow" x1="132" y1="269" x2="168" y2="269" marker-end="url(#tip)"/>
+      <text x="150" y="260" text-anchor="middle" class="lbl-dim">load</text>
+    </g>
+
+    <!-- driver -->
+    <g class="zone" id="z-driver">
+      <rect class="box-sunk" x="178" y="34" width="536" height="470" rx="6"/>
+      <text x="194" y="54" class="lbl-hd">CUDA DRIVER</text>
+      <text x="700" y="54" text-anchor="end" class="lbl-dim" id="stageTag">container walk</text>
+      <g id="gates"></g>
+      <g id="rows"></g>
+    </g>
+
+    <!-- to gpu -->
+    <g class="carrier" id="carrier">
+      <line class="flow" x1="722" y1="269" x2="768" y2="269" stroke="var(--signal)" marker-end="url(#tipHot)"/>
+      <text x="745" y="260" text-anchor="middle" class="lbl-dim" fill="var(--signal)">SASS</text>
+    </g>
+
+    <!-- gpu -->
+    <g class="zone" id="z-gpu">
+      <text x="782" y="222" class="lbl-hd">GPU</text>
+      <rect class="box" x="782" y="232" width="164" height="74" rx="4"/>
+      <text x="864" y="258" text-anchor="middle" class="lbl">sm_89</text>
+      <text x="864" y="276" text-anchor="middle" class="lbl-dim" id="gpuState">idle</text>
+      <g id="sparks">
+        <rect class="spark" x="800" y="286" width="8" height="8" rx="1"/>
+        <rect class="spark" x="814" y="286" width="8" height="8" rx="1"/>
+        <rect class="spark" x="828" y="286" width="8" height="8" rx="1"/>
+        <rect class="spark" x="842" y="286" width="8" height="8" rx="1"/>
+        <rect class="spark" x="856" y="286" width="8" height="8" rx="1"/>
+        <rect class="spark" x="870" y="286" width="8" height="8" rx="1"/>
+        <rect class="spark" x="884" y="286" width="8" height="8" rx="1"/>
+        <rect class="spark" x="898" y="286" width="8" height="8" rx="1"/>
+        <rect class="spark" x="912" y="286" width="8" height="8" rx="1"/>
+      </g>
+      <text x="864" y="322" text-anchor="middle" class="lbl-dim" id="gpuOut"></text>
+    </g>
+  </svg>
+  </div>
+  <p class="scroll-hint">Scroll the diagram sideways to follow the whole path.</p>
+
+  <p class="key">
+    <span><i class="k-read"></i><b>blue</b> the gate being applied</span>
+    <span><i class="k-drop"></i><b>red</b> the field that dropped an entry</span>
+    <span><i class="k-sig"></i><b>green</b> the entry that runs</span>
+  </p>
+
+  <div class="narr">
+    <span class="step-no" id="stepNo">1</span>
+    <span class="narr-b">
+      <span class="narr-t" id="narrT">A fat binary reaches the driver</span>
+      <span class="narr-d" id="narrD">Six entries, all compiled from the same kernel source.</span>
+    </span>
+  </div>
+
+  <div class="bar">
+    <button class="ctl" id="play" type="button">Pause</button>
+    <button class="ctl" id="again" type="button">Replay</button>
+    <div class="rail" id="rail"></div>
+  </div>
+
+  <p class="foot">This exact container was built and run. With bit 24 set on entry 3 the GPU
+  returns marker 0xBBBB, and with that single bit cleared it returns 0xAAAA, because entry 3
+  then wins on file order instead. Nothing else in the file changes. The rule is the driver's
+  own, measured on 29 conflicting containers and confirmed in the driver binary; every field
+  it reads sits in the entry header, and the compiled code is never consulted until one entry
+  has already won.</p>
+</div>
+
+<script>
+(function(){
+  var ENTRIES=[
+    {n:"entry 0", kind:"kind 1  ptx",  arch:"compute_89", bits:[],        dies:1, cul:"kind",  why:"outranked by kind"},
+    {n:"entry 1", kind:"kind 2  elf",  arch:"sm_75",      bits:[],        dies:0, cul:"arch",  why:"wrong cubin generation"},
+    {n:"entry 2", kind:"kind 2  elf",  arch:"sm_86",      bits:[],        dies:2, cul:"arch",  why:"further from the GPU"},
+    {n:"entry 3", kind:"kind 2  elf",  arch:"sm_89",      bits:["bit 24"],dies:3, cul:"bit",   why:"carries bit 24"},
+    {n:"entry 4", kind:"kind 2  elf",  arch:"sm_89",      bits:[],        dies:-1,why:"survives"},
+    {n:"entry 5", kind:"kind 2  elf",  arch:"sm_89",      bits:[],        dies:4, cul:"order", why:"later in file order"}
+  ];
+
+  var STEPS=[
+    {tag:"container walk", zone:"driver", t:"A fat binary reaches the driver",
+     d:"Six entries, every one compiled from the same kernel source. The driver reads each entry header and steps forward by the stride the header declares."},
+    {tag:"level 0  compatibility", zone:"driver", kill:0, t:"Level 0, compatibility",
+     d:"Cubins are compatible only inside their major generation, so sm_75 is not a candidate on an sm_89 GPU. It leaves before any ranking happens."},
+    {tag:"level 1  kind", zone:"driver", kill:1, t:"Level 1, kind",
+     d:"A cubin beats PTX unconditionally. This PTX entry is an exact architecture match and it still loses, because kind is decided first."},
+    {tag:"level 2  architecture", zone:"driver", kill:2, t:"Level 2, architecture",
+     d:"Among entries of one kind the nearest compatible architecture wins, whatever the file order says. sm_86 would run here, but sm_89 is nearer."},
+    {tag:"level 3  flag bit 24", zone:"driver", kill:3, t:"Level 3, flag bit 24",
+     d:"Two cubins now tie on kind and architecture. One bit of the flags field separates them, and the entry without it wins. Nothing else in the container differs."},
+    {tag:"level 4  file order", zone:"driver", kill:4, t:"Level 4, file order",
+     d:"Still tied, so position decides at last. For cubins the first wins. For PTX it is the last, so there is no single positional rule a tool can implement."},
+    {tag:"handoff", zone:"gpu", win:true, carrier:true, t:"The winner is loaded",
+     d:"Entry 4 survives and its compiled SASS goes to the device. Only now does the driver look at the code itself."},
+    {tag:"running", zone:"gpu", win:true, carrier:true, run:true, t:"It runs on the hardware",
+     d:"The kernel writes its marker. Which of the six ran was settled entirely by header fields, and the five crossed out above are dead code."}
+  ];
+
+  var GATES=[
+    {n:"0",name:"compatibility",left:5},
+    {n:"1",name:"kind",left:4},
+    {n:"2",name:"architecture",left:3},
+    {n:"3",name:"flag bit 24",left:2},
+    {n:"4",name:"file order",left:1}
+  ];
+
+  var ns="http://www.w3.org/2000/svg";
+  var gates=document.getElementById("gates");
+  var GX=194, GW=92, GGAP=8, GY=78, GH=52;
+
+  // "6 in" marker, then one gate per level, counts falling 6 -> 1
+  (function(){
+    var t=document.createElementNS(ns,"text");
+    t.setAttribute("x",GX); t.setAttribute("y",GY-8);
+    t.setAttribute("class","lbl-dim"); t.textContent="candidates  6";
+    gates.appendChild(t);
+  })();
+
+  GATES.forEach(function(g,i){
+    var x=GX+i*(GW+GGAP);
+    var grp=document.createElementNS(ns,"g");
+    grp.setAttribute("class","gate future"); grp.id="gate-"+i;
+
+    var r=document.createElementNS(ns,"rect");
+    r.setAttribute("class","g"); r.setAttribute("x",x); r.setAttribute("y",GY);
+    r.setAttribute("width",GW); r.setAttribute("height",GH); r.setAttribute("rx",4);
+    grp.appendChild(r);
+
+    function t(cls,yy,txt,size){
+      var e=document.createElementNS(ns,"text");
+      e.setAttribute("class",cls); e.setAttribute("x",x+GW/2); e.setAttribute("y",yy);
+      e.setAttribute("text-anchor","middle"); e.textContent=txt;
+      grp.appendChild(e); return e;
+    }
+    t("g-n",GY+15,"level "+g.n);
+    t("g-name",GY+30,g.name);
+    var lf=t("g-left",GY+46,"\u2013");
+    lf.id="left-"+i;
+    gates.appendChild(grp);
+
+    if(i<GATES.length-1){
+      var w=document.createElementNS(ns,"line");
+      w.setAttribute("class","gwire"); w.id="wire-"+i;
+      w.setAttribute("x1",x+GW); w.setAttribute("y1",GY+GH/2);
+      w.setAttribute("x2",x+GW+GGAP); w.setAttribute("y2",GY+GH/2);
+      gates.appendChild(w);
+    }
+  });
+
+  var rows=document.getElementById("rows");
+  var Y0=144, STEPH=58, X=196, W=498, H=46;
+
+  ENTRIES.forEach(function(e,i){
+    var y=Y0+i*STEPH;
+    var g=document.createElementNS(ns,"g");
+    g.setAttribute("class","row"); g.id="row-"+i;
+
+    var r=document.createElementNS(ns,"rect");
+    r.setAttribute("class","card"); r.setAttribute("x",X); r.setAttribute("y",y);
+    r.setAttribute("width",W); r.setAttribute("height",H); r.setAttribute("rx",4);
+    g.appendChild(r);
+
+    function tx(x,yy,cls,txt,anchor){
+      var t=document.createElementNS(ns,"text");
+      t.setAttribute("x",x); t.setAttribute("y",yy); t.setAttribute("class",cls);
+      if(anchor)t.setAttribute("text-anchor",anchor);
+      t.textContent=txt; g.appendChild(t); return t;
+    }
+    // A red cross, placed just past the field that caused the removal.
+    function cross(cx){
+      var xg=document.createElementNS(ns,"g");
+      xg.setAttribute("class","xmark");
+      [[-5,-5,5,5],[-5,5,5,-5]].forEach(function(d){
+        var l=document.createElementNS(ns,"line");
+        l.setAttribute("x1",cx+d[0]); l.setAttribute("y1",y+23+d[1]);
+        l.setAttribute("x2",cx+d[2]); l.setAttribute("y2",y+23+d[3]);
+        xg.appendChild(l);
+      });
+      g.appendChild(xg);
+    }
+
+    // A highlight box behind the one field that caused this entry's removal.
+    // The labels are monospace at 11px, so the advance is a reliable 6.62px.
+    function mark(x,txt){
+      var w=txt.length*6.62+11;
+      var r=document.createElementNS(ns,"rect");
+      r.setAttribute("class","cul-bg"); r.setAttribute("x",x-5.5);
+      r.setAttribute("y",y+12); r.setAttribute("width",w); r.setAttribute("height",21);
+      r.setAttribute("rx",3); g.appendChild(r);
+      cross(x-5.5+w+11);
+    }
+
+    if(e.cul==="order") mark(X+14,e.n);
+    if(e.cul==="kind")  mark(X+92,e.kind);
+    if(e.cul==="arch")  mark(X+208,e.arch);
+    if(e.cul==="bit")   cross(X+300+46+11);   // just past the bit-24 chip
+
+    var tName=tx(X+14,y+28,"lbl name",e.n);
+    var tKind=tx(X+92,y+28,"lbl",e.kind);
+    var tArch=tx(X+208,y+28,"lbl",e.arch);
+    if(e.cul==="order") tName.setAttribute("class","lbl name culprit");
+    if(e.cul==="kind")  tKind.setAttribute("class","lbl culprit");
+    if(e.cul==="arch")  tArch.setAttribute("class","lbl culprit");
+
+    if(e.bits.length){
+      var bg=document.createElementNS(ns,"g"); bg.setAttribute("class","bitset");
+      var c=document.createElementNS(ns,"rect");
+      c.setAttribute("class","chip"); c.setAttribute("x",X+300); c.setAttribute("y",y+13);
+      c.setAttribute("width",46); c.setAttribute("height",20); c.setAttribute("rx",3);
+      bg.appendChild(c);
+      var ct=document.createElementNS(ns,"text");
+      ct.setAttribute("class","chip-t"); ct.setAttribute("x",X+323); ct.setAttribute("y",y+27);
+      ct.setAttribute("text-anchor","middle"); ct.textContent=e.bits[0];
+      bg.appendChild(ct);
+      var ring=document.createElementNS(ns,"rect");
+      ring.setAttribute("class","pulse"); ring.id="pulse-"+i;
+      ring.setAttribute("x",X+300); ring.setAttribute("y",y+13);
+      ring.setAttribute("width",46); ring.setAttribute("height",20); ring.setAttribute("rx",3);
+      bg.appendChild(ring);
+      g.appendChild(bg);
+    }
+    tx(X+W-14,y+28,"why",e.why,"end");
+    rows.appendChild(g);
+  });
+
+  var step=0, timer=null, playing=true;
+  var elPlay=document.getElementById("play");
+
+  function paint(){
+    var s=STEPS[step];
+    document.getElementById("stageTag").textContent=s.tag;
+    document.getElementById("stepNo").textContent=String(step+1);
+    document.getElementById("narrT").textContent=s.t;
+    document.getElementById("narrD").textContent=s.d;
+
+    ["file","driver","gpu"].forEach(function(z){
+      var el=document.getElementById("z-"+z);
+      el.classList.toggle("hot",s.zone===z);
+      el.classList.toggle("idle",s.zone!==z && !(z==="driver"&&s.zone==="gpu"));
+    });
+
+    ENTRIES.forEach(function(e,i){
+      var g=document.getElementById("row-"+i);
+      var dead=false;
+      for(var k=0;k<=step;k++){ if(STEPS[k].kill===e.dies && e.dies>=0) dead=true; }
+      g.classList.toggle("dead",dead);
+      g.classList.toggle("dropping", s.kill!==undefined && s.kill===e.dies && e.dies>=0);
+      g.classList.toggle("win",!!s.win && e.dies<0);
+      var p=document.getElementById("pulse-"+i);
+      if(p)p.classList.toggle("on",s.kill===3 && e.dies===3);
+    });
+
+    GATES.forEach(function(g,i){
+      var el=document.getElementById("gate-"+i);
+      var reached = s.kill!==undefined ? i<=s.kill : (step>5);
+      var active  = s.kill===i;
+      var finalG  = (step>5) && i===GATES.length-1;
+      el.setAttribute("class","gate "+(active?"active":finalG?"final":reached?"done":"future"));
+      document.getElementById("left-"+i).textContent = reached ? (g.left+" left") : "\u2013";
+      var w=document.getElementById("wire-"+i);
+      if(w) w.classList.toggle("lit", reached && i<(s.kill===undefined?4:s.kill));
+    });
+
+    document.getElementById("carrier").classList.toggle("on",!!s.carrier);
+    var gpu=document.getElementById("z-gpu");
+    gpu.classList.toggle("gpu-live",!!s.run);
+    document.getElementById("gpuState").textContent=s.run?"executing":(s.carrier?"receiving":"idle");
+    document.getElementById("gpuOut").textContent=s.run?"marker 0xBBBB":"";
+    var sp=document.querySelectorAll(".spark");
+    for(var i=0;i<sp.length;i++) sp[i].classList.toggle("on",!!s.run);
+
+    var ticks=document.querySelectorAll(".tick");
+    for(var j=0;j<ticks.length;j++){
+      ticks[j].setAttribute("aria-current",j===step?"true":"false");
+      ticks[j].classList.toggle("done",j<step);
+    }
+  }
+
+  var rail=document.getElementById("rail");
+  STEPS.forEach(function(s,i){
+    var b=document.createElement("button");
+    b.className="tick"; b.type="button"; b.id="tick-"+i;
+    b.setAttribute("aria-label","Step "+(i+1)+": "+s.t);
+    b.onclick=function(){stop(); step=i; paint();};
+    rail.appendChild(b);
+  });
+
+  function advance(){
+    step=(step+1)%STEPS.length;
+    paint();
+    schedule();
+  }
+  function schedule(){
+    clearTimeout(timer);
+    if(!playing)return;
+    timer=setTimeout(advance, step===STEPS.length-1?4400:(step===0?2400:2600));
+  }
+  function stop(){ playing=false; clearTimeout(timer); elPlay.textContent="Play"; }
+  function start(){ playing=true; elPlay.textContent="Pause"; schedule(); }
+
+  elPlay.onclick=function(){ playing?stop():start(); };
+  document.getElementById("again").onclick=function(){ step=0; paint(); start(); };
+
+  var q=new URLSearchParams(location.search);
+  if(q.get("embed")==="1") document.body.classList.add("embed");
+
+  if(q.has("step")){
+    // one fixed frame, no motion: how the GIF frames are captured
+    step=Math.max(0,Math.min(STEPS.length-1,parseInt(q.get("step"),10)||0));
+    paint(); stop();
+  } else {
+    // Open on the finished state: a thumbnail, a shared link and a reader who never
+    // presses play all get the frame that carries the whole argument.
+    step=STEPS.length-1; paint();
+    if(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches){
+      stop();
+    } else {
+      elPlay.textContent="Pause";
+      timer=setTimeout(function(){ step=0; paint(); start(); },3000);
+    }
+  }
+})();
+</script>

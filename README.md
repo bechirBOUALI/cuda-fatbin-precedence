@@ -28,6 +28,22 @@ Every finding below lies beneath that line.
 | 11 | Entry kinds 0x20, 0x80 and 0x100 are `index`, `tile ir` and `contatenated entry`, NVIDIA's own spelling | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 | 12 | Kind 0x10 is an ELF the driver finalizes before load. **Inference**, not confirmed: NVIDIA names it nowhere | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 
+![One fat binary, six entries, five eliminated by header fields, one running on the GPU](docs/entry-selection.gif)
+
+Six entries compiled from one kernel, and five are dead before the GPU sees
+anything. Each gate crosses out the entry it rejects and marks the field that
+did it: the wrong cubin generation, the kind that outranks it, the further
+architecture, the flag bit, the file position. Entry 4 survives and runs.
+
+That container is real. Building it and clearing bit 24 on entry 3 changes the
+marker the GPU returns from `0xBBBB` to `0xAAAA`, because entry 3 then wins on
+file order instead. Nothing else in the file changes.
+
+Open [docs/entry-selection.html](docs/entry-selection.html) for the same
+walkthrough with a pause control, or
+[docs/entry-explorer.html](docs/entry-explorer.html) to edit the entries and
+flag bits yourself and watch the rule decide.
+
 The selection path is given as disassembly in
 [driver-selection-logic](analysis/driver-selection-logic.md) and as decompiled
 C in [decompiled-selection](analysis/decompiled-selection.md). What was already
@@ -113,6 +129,7 @@ mistaken for a fresh selection decision. The matrix script sets it itself.
 
 ```
 WRITEUP.md   the argument end to end
+docs/        the selection walkthrough as a GIF and as two live pages
 analysis/    the evidence behind each finding above
 scripts/     the parser, the divergence matrix, the shipped-library survey
 src/         test kernels and a minimal Driver API loader

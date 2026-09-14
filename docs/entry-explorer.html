@@ -1,0 +1,453 @@
+<title>Which Entry Runs</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  :root{
+    --ground:#faf8f4; --surface:#fffefb; --sunk:#f1eee7;
+    --ink:#1d1b17; --ink-2:#4c4740; --ink-3:#847d72;
+    --rule:#ded8cd; --rule-2:#c8c0b1;
+    --signal:#2d7a4e; --signal-ink:#f7fdf9; --signal-soft:#dbefe1;
+    --read:#43607f; --read-soft:#dfe7f0;
+    --dead:#a39c90;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"Archivo",system-ui,-apple-system,sans-serif;
+    --serif:"Source Serif 4",Georgia,serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#17161a; --surface:#1f1e23; --sunk:#141317;
+      --ink:#efece6; --ink-2:#b8b2a8; --ink-3:#847e74;
+      --rule:#33313a; --rule-2:#46434e;
+      --signal:#6ec98d; --signal-ink:#0d2116; --signal-soft:#1e3a29;
+      --read:#8fb0d6; --read-soft:#212c3a;
+      --dead:#6a655e;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#17161a; --surface:#1f1e23; --sunk:#141317;
+    --ink:#efece6; --ink-2:#b8b2a8; --ink-3:#847e74;
+    --rule:#33313a; --rule-2:#46434e;
+    --signal:#6ec98d; --signal-ink:#0d2116; --signal-soft:#1e3a29;
+    --read:#8fb0d6; --read-soft:#212c3a;
+    --dead:#6a655e;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground); color:var(--ink);
+    font-family:var(--serif); font-size:16px; line-height:1.6;
+    margin:0; padding-block:40px; padding-left:20px; padding-right:20px;
+  }
+  .wrap{max-width:980px; margin:0 auto; display:flex; flex-direction:column; gap:40px}
+
+  h1{
+    font-family:var(--sans); font-weight:700; font-size:clamp(28px,5vw,42px);
+    letter-spacing:-.02em; line-height:1.1; margin:0; text-wrap:balance;
+  }
+  .lede{font-size:18px; color:var(--ink-2); margin:12px 0 0; max-width:62ch}
+  h2{
+    font-family:var(--sans); font-weight:600; font-size:13px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 14px;
+  }
+  p{margin:0 0 12px; max-width:68ch}
+  code{font-family:var(--mono); font-size:.88em; background:var(--sunk); padding:1px 5px; border-radius:3px}
+
+  figure{margin:0}
+  figure svg{width:100%; height:auto; max-width:100%; color:var(--ink-2)}
+  figcaption{font-size:14px; color:var(--ink-3); margin-top:10px; max-width:68ch}
+
+  .board{display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:28px; align-items:start}
+  @media(max-width:760px){ .board{grid-template-columns:1fr} }
+
+  .container-hdr{
+    font-family:var(--mono); font-size:12px; color:var(--ink-3);
+    border:1px solid var(--rule); border-bottom:none; border-radius:6px 6px 0 0;
+    padding:8px 12px; background:var(--sunk); display:flex; gap:16px; flex-wrap:wrap;
+  }
+  .entries{display:flex; flex-direction:column; gap:0; border:1px solid var(--rule); border-radius:0 0 6px 6px; overflow:hidden}
+
+  .entry{
+    background:var(--surface); border-top:1px solid var(--rule);
+    padding:14px 14px 12px; display:flex; flex-direction:column; gap:10px;
+    position:relative;
+  }
+  .entry:first-child{border-top:none}
+  .entry[data-state="winner"]{background:var(--signal-soft)}
+  .entry[data-state="out"] .fields{opacity:.45}
+
+  .entry-top{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .idx{
+    font-family:var(--mono); font-size:11px; font-weight:700; color:var(--ink-3);
+    border:1px solid var(--rule-2); border-radius:3px; padding:2px 6px; letter-spacing:.04em;
+  }
+  .entry[data-state="winner"] .idx{background:var(--signal); color:var(--signal-ink); border-color:var(--signal)}
+  .verdict{font-family:var(--sans); font-size:12px; font-weight:600; letter-spacing:.03em}
+  .verdict[data-tone="win"]{color:var(--signal)}
+  .verdict[data-tone="out"]{color:var(--dead)}
+  .mover{margin-left:auto; display:flex; gap:4px}
+  .mover button{
+    font-family:var(--mono); font-size:12px; line-height:1; padding:5px 8px; cursor:pointer;
+    background:var(--surface); color:var(--ink-2); border:1px solid var(--rule-2); border-radius:3px;
+  }
+  .mover button:hover:not(:disabled){border-color:var(--ink-3); color:var(--ink)}
+  .mover button:disabled{opacity:.3; cursor:default}
+
+  .fields{display:flex; flex-wrap:wrap; gap:8px 18px; align-items:flex-end}
+  .field{display:flex; flex-direction:column; gap:3px}
+  .field > span{font-family:var(--mono); font-size:10px; color:var(--ink-3); letter-spacing:.05em}
+  .field select,.field input{
+    font-family:var(--mono); font-size:13px; padding:4px 6px; color:var(--ink);
+    background:var(--sunk); border:1px solid var(--rule-2); border-radius:3px;
+  }
+  .field input{width:66px}
+  .field.read-now > span{color:var(--read)}
+  .field.read-now select,.field.read-now input{border-color:var(--read); background:var(--read-soft)}
+
+  .bits{display:flex; gap:5px; flex-wrap:wrap}
+  .bit{
+    font-family:var(--mono); font-size:11px; padding:4px 7px; cursor:pointer; user-select:none;
+    background:var(--sunk); color:var(--ink-3); border:1px solid var(--rule-2); border-radius:3px;
+  }
+  .bit[aria-pressed="true"]{background:var(--read); color:var(--ground); border-color:var(--read)}
+  .bit:focus-visible,.mover button:focus-visible,select:focus-visible,input:focus-visible,
+  .preset:focus-visible{outline:2px solid var(--signal); outline-offset:2px}
+  .flagword{font-family:var(--mono); font-size:11px; color:var(--ink-3)}
+
+  .panel{border:1px solid var(--rule); border-radius:6px; background:var(--surface); padding:16px}
+  .result{
+    font-family:var(--sans); font-weight:700; font-size:20px; letter-spacing:-.01em;
+    margin:0 0 4px; color:var(--signal);
+  }
+  .result[data-tone="none"]{color:var(--dead)}
+  .result-sub{font-size:14px; color:var(--ink-2); margin:0}
+
+  ol.levels{list-style:none; margin:16px 0 0; padding:0; display:flex; flex-direction:column; gap:0}
+  ol.levels li{
+    display:grid; grid-template-columns:26px 1fr; gap:10px; padding:9px 0;
+    border-top:1px solid var(--rule); align-items:baseline;
+  }
+  ol.levels li:first-child{border-top:none}
+  .lv{font-family:var(--mono); font-size:11px; color:var(--ink-3)}
+  .lv-name{font-family:var(--sans); font-weight:600; font-size:13px}
+  .lv-note{font-size:13px; color:var(--ink-2); font-family:var(--serif)}
+  li[data-active="true"] .lv{color:var(--read); font-weight:700}
+  li[data-active="true"] .lv-name{color:var(--read)}
+  li[data-active="false"]{opacity:.5}
+
+  .controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+  .preset{
+    font-family:var(--sans); font-size:12.5px; font-weight:600; cursor:pointer;
+    padding:7px 11px; border-radius:4px; color:var(--ink-2);
+    background:var(--surface); border:1px solid var(--rule-2);
+  }
+  .preset:hover{border-color:var(--ink-3); color:var(--ink)}
+  .preset[aria-pressed="true"]{background:var(--signal); color:var(--signal-ink); border-color:var(--signal)}
+  .hostline{font-family:var(--mono); font-size:12px; color:var(--ink-3); display:flex; gap:14px; flex-wrap:wrap; align-items:center}
+  .hostline label{display:flex; gap:6px; align-items:center; cursor:pointer}
+
+  .foot{font-size:14px; color:var(--ink-3); border-top:1px solid var(--rule); padding-top:16px}
+  .foot p{max-width:70ch}
+  @media(prefers-reduced-motion:no-preference){
+    .entry,.bit,.preset{transition:background-color .15s ease,color .15s ease,border-color .15s ease}
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <h1>Which entry runs</h1>
+    <p class="lede">A CUDA fat binary holds several compiled forms of the same kernel. The
+    driver executes exactly one. Change the entries below and watch the rule decide.</p>
+  </header>
+
+  <section>
+    <h2>Where the decisive bytes live</h2>
+    <figure>
+      <svg viewBox="0 0 760 250" role="img" aria-label="A fat binary container holds a 16-byte header followed by entries; each entry has a 64-byte header carrying kind at offset 0, architecture at 0x1c and flags at 0x28, followed by its payload.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,1 9,5 0,9" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <text x="0" y="14" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor" opacity=".75">.nv_fatbin</text>
+
+        <rect x="0" y="26" width="96" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="48" y="44" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor">container</text>
+        <text x="48" y="58" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor" opacity=".7">16 bytes</text>
+
+        <rect x="112" y="26" width="150" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="187" y="44" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor">entry 0</text>
+        <text x="187" y="58" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor" opacity=".7">header + payload</text>
+
+        <rect x="274" y="26" width="150" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="349" y="44" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor">entry 1</text>
+        <text x="349" y="58" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor" opacity=".7">header + payload</text>
+
+        <rect x="436" y="26" width="80" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="476" y="51" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor" opacity=".7">...</text>
+
+        <text x="60" y="88" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".65">stride = headerSize + payloadSize</text>
+        <line x1="112" y1="76" x2="262" y2="76" stroke="currentColor" stroke-width="1" opacity=".5"/>
+        <line x1="112" y1="72" x2="112" y2="80" stroke="currentColor" stroke-width="1" opacity=".5"/>
+        <line x1="262" y1="72" x2="262" y2="80" stroke="currentColor" stroke-width="1" opacity=".5"/>
+
+        <line x1="130" y1="70" x2="70" y2="116" stroke="currentColor" stroke-width="1" opacity=".45" marker-end="url(#ar)"/>
+        <line x1="240" y1="70" x2="470" y2="116" stroke="currentColor" stroke-width="1" opacity=".45" marker-end="url(#ar)"/>
+
+        <rect x="40" y="122" width="480" height="96" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="52" y="140" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor" opacity=".75">entry header, 0x40 bytes</text>
+
+        <rect x="52" y="150" width="104" height="30" rx="3" fill="none" stroke="#5a7599" stroke-width="2"/>
+        <text x="104" y="163" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">+0x00 kind</text>
+        <text x="104" y="175" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">u16</text>
+
+        <rect x="168" y="150" width="104" height="30" rx="3" fill="none" stroke="#5a7599" stroke-width="2"/>
+        <text x="220" y="163" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">+0x1c arch</text>
+        <text x="220" y="175" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">u32</text>
+
+        <rect x="284" y="150" width="104" height="30" rx="3" fill="none" stroke="#5a7599" stroke-width="2"/>
+        <text x="336" y="163" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">+0x28 flags</text>
+        <text x="336" y="175" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">u64</text>
+
+        <rect x="400" y="150" width="108" height="30" rx="3" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="3 3" opacity=".6"/>
+        <text x="454" y="169" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".6">sizes, ident</text>
+
+        <text x="52" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">flags bits that decide:</text>
+        <text x="196" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">16 obfuscated</text>
+        <text x="288" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">20 suffix a</text>
+        <text x="368" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">21 suffix f</text>
+        <text x="444" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">24 tie-break</text>
+
+        <line x1="530" y1="170" x2="576" y2="170" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+        <rect x="586" y="146" width="168" height="48" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="670" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor">selection</text>
+        <text x="670" y="181" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">one entry executes</text>
+        <text x="553" y="164" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="currentColor" opacity=".6">reads</text>
+      </svg>
+      <figcaption>Every field the driver selects on lives in the entry header, never in the
+      payload. The code itself is not consulted until after one entry has already won.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Try it</h2>
+    <div class="controls" style="margin-bottom:18px">
+      <button class="preset" data-preset="cubin-beats-ptx" type="button">Cubin beats PTX</button>
+      <button class="preset" data-preset="kind-outranks-arch" type="button">Kind outranks architecture</button>
+      <button class="preset" data-preset="bit24" type="button">Bit 24 flips the winner</button>
+      <button class="preset" data-preset="last-ptx" type="button">Last PTX wins</button>
+      <button class="preset" data-preset="suffix" type="button">sm_89a matches nothing</button>
+      <button class="preset" data-preset="obf" type="button">Obfuscated entry</button>
+    </div>
+
+    <div class="board">
+      <div>
+        <div class="container-hdr">
+          <span>magic ba55ed50</span><span>headerSize 0x10</span><span id="fatsize">fatSize ...</span>
+        </div>
+        <div class="entries" id="entries"></div>
+        <div class="hostline" style="margin-top:12px">
+          <span>host GPU</span>
+          <label><input type="checkbox" id="forcejit"> CUDA_FORCE_PTX_JIT=1</label>
+          <span id="targetname">target sm_89</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <p class="result" id="result">...</p>
+        <p class="result-sub" id="resultsub"></p>
+        <ol class="levels" id="levels"></ol>
+      </div>
+    </div>
+  </section>
+
+  <div class="foot">
+    <p>The rule shown here is <code>would_execute()</code> from the fat binary parser,
+    measured against a real GPU on 29 conflicting containers and confirmed in the
+    driver's own code. Driver 597.06, compute capability 8.9.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  var KIND={1:"PTX",2:"ELF",16:"kind 0x10",32:"index",128:"tile ir"};
+  var RANK={2:3,16:2,1:1};
+  var TARGET={sm:89,suffix:""};
+
+  var entries=[];
+  function E(kind,arch,suffix,bits){return{kind:kind,arch:arch,suffix:suffix||"",b16:!!(bits&&bits.b16),b20:!!(bits&&bits.b20),b21:!!(bits&&bits.b21),b24:!!(bits&&bits.b24)};}
+
+  var PRESETS={
+    "cubin-beats-ptx":[E(1,89),E(2,89)],
+    "kind-outranks-arch":[E(2,86),E(1,89)],
+    "bit24":[E(2,89,"",{b24:true}),E(2,89)],
+    "last-ptx":[E(1,89),E(1,89)],
+    "suffix":[E(2,89,"a")],
+    "obf":[E(1,89,"",{b16:true}),E(2,75)]
+  };
+
+  function suffixOf(e){return e.b20?"a":e.b21?"f":"";}
+  function archLabel(e){return (e.kind===1?"compute_":"sm_")+e.arch+suffixOf(e);}
+  function flagWord(e){
+    var v=0x11;
+    if(e.b16)v|=1<<16; if(e.b20)v|=1<<20; if(e.b21)v|=1<<21; if(e.b24)v|=1<<24;
+    return "0x"+v.toString(16);
+  }
+  function compatible(e){
+    if(!(e.kind in RANK)) return "kind is never a selection candidate";
+    if(suffixOf(e)!==TARGET.suffix) return "declares "+archLabel(e)+", no GPU reports that";
+    if(e.arch>TARGET.sm) return "newer than the GPU";
+    if(e.kind===2 && Math.floor(e.arch/10)!==Math.floor(TARGET.sm/10)) return "wrong cubin generation";
+    return null;
+  }
+
+  function select(){
+    var forced=document.getElementById("forcejit").checked;
+    var pool=[],why={};
+    entries.forEach(function(e,i){
+      var bad=compatible(e);
+      if(bad){why[i]={lv:0,txt:bad};return;}
+      if(forced && e.kind===2){why[i]={lv:0,txt:"discarded by CUDA_FORCE_PTX_JIT"};return;}
+      pool.push({e:e,i:i});
+    });
+    var best=null;
+    pool.forEach(function(c){
+      if(!best){best=c;return;}
+      var rb=RANK[best.e.kind],rc=RANK[c.e.kind];
+      if(rc!==rb){ if(rc>rb){why[best.i]={lv:1,txt:"outranked by kind"};best=c;} else {why[c.i]={lv:1,txt:"outranked by kind"};} return;}
+      if(c.e.arch!==best.e.arch){ if(c.e.arch>best.e.arch){why[best.i]={lv:2,txt:"further from the GPU"};best=c;} else {why[c.i]={lv:2,txt:"further from the GPU"};} return;}
+      if(c.e.kind===2 && c.e.b24!==best.e.b24){ if(best.e.b24){why[best.i]={lv:3,txt:"carries bit 24"};best=c;} else {why[c.i]={lv:3,txt:"carries bit 24"};} return;}
+      if(c.e.kind===1){ why[best.i]={lv:4,txt:"an earlier PTX entry"}; best=c; return;}
+      why[c.i]={lv:4,txt:"a later cubin entry"};
+    });
+    return {best:best,why:why,forced:forced};
+  }
+
+  function render(){
+    var host=document.getElementById("entries");
+    host.innerHTML="";
+    var r=select();
+
+    entries.forEach(function(e,i){
+      var out=!r.best||r.best.i!==i;
+      var d=document.createElement("div");
+      d.className="entry"; d.setAttribute("data-state",out?"out":"winner");
+
+      var top=document.createElement("div"); top.className="entry-top";
+      top.innerHTML='<span class="idx">entry '+i+'</span>';
+      var v=document.createElement("span"); v.className="verdict";
+      if(!out){v.setAttribute("data-tone","win"); v.textContent="executes";}
+      else{v.setAttribute("data-tone","out"); v.textContent=r.why[i]?r.why[i].txt:"not selected";}
+      top.appendChild(v);
+
+      var mv=document.createElement("div"); mv.className="mover";
+      var up=document.createElement("button"); up.type="button"; up.textContent="↑";
+      up.setAttribute("aria-label","Move entry "+i+" earlier"); up.disabled=(i===0);
+      up.onclick=function(){var t=entries[i-1];entries[i-1]=entries[i];entries[i]=t;clearPreset();render();};
+      var dn=document.createElement("button"); dn.type="button"; dn.textContent="↓";
+      dn.setAttribute("aria-label","Move entry "+i+" later"); dn.disabled=(i===entries.length-1);
+      dn.onclick=function(){var t=entries[i+1];entries[i+1]=entries[i];entries[i]=t;clearPreset();render();};
+      var rm=document.createElement("button"); rm.type="button"; rm.textContent="✕";
+      rm.setAttribute("aria-label","Remove entry "+i); rm.disabled=(entries.length<=1);
+      rm.onclick=function(){entries.splice(i,1);clearPreset();render();};
+      mv.appendChild(up); mv.appendChild(dn); mv.appendChild(rm);
+      top.appendChild(mv);
+      d.appendChild(top);
+
+      var f=document.createElement("div"); f.className="fields";
+
+      var fk=document.createElement("label"); fk.className="field";
+      fk.innerHTML='<span>+0x00 KIND</span>';
+      var sel=document.createElement("select"); sel.id="kind-"+i;
+      [[1,"1 ptx"],[2,"2 elf"],[16,"0x10 unnamed"],[32,"0x20 index"],[128,"0x80 tile ir"]].forEach(function(o){
+        var op=document.createElement("option"); op.value=o[0]; op.textContent=o[1];
+        if(e.kind===o[0])op.selected=true; sel.appendChild(op);
+      });
+      sel.onchange=function(){e.kind=parseInt(sel.value,10);clearPreset();render();};
+      fk.appendChild(sel); f.appendChild(fk);
+
+      var fa=document.createElement("label"); fa.className="field";
+      fa.innerHTML='<span>+0x1c ARCH</span>';
+      var inp=document.createElement("input"); inp.type="number"; inp.value=e.arch; inp.min="1"; inp.max="999"; inp.id="arch-"+i;
+      inp.onchange=function(){e.arch=Math.max(1,Math.min(999,parseInt(inp.value,10)||89));clearPreset();render();};
+      fa.appendChild(inp); f.appendChild(fa);
+
+      var fb=document.createElement("div"); fb.className="field";
+      fb.innerHTML='<span>+0x28 FLAGS</span>';
+      var bits=document.createElement("div"); bits.className="bits";
+      [["b16",16],["b20",20],["b21",21],["b24",24]].forEach(function(p){
+        var b=document.createElement("button"); b.type="button"; b.className="bit";
+        b.textContent="bit "+p[1]; b.id="bit"+p[1]+"-"+i;
+        b.setAttribute("aria-pressed",e[p[0]]?"true":"false");
+        b.onclick=function(){e[p[0]]=!e[p[0]];clearPreset();render();};
+        bits.appendChild(b);
+      });
+      fb.appendChild(bits); f.appendChild(fb);
+
+      var fw=document.createElement("div"); fw.className="field";
+      fw.innerHTML='<span>VALUE</span><div class="flagword">'+flagWord(e)+" &middot; "+archLabel(e)+"</div>";
+      f.appendChild(fw);
+
+      d.appendChild(f);
+      host.appendChild(d);
+    });
+
+    var add=document.createElement("div"); add.className="entry";
+    var ab=document.createElement("button"); ab.type="button"; ab.className="preset";
+    ab.textContent="+ add entry"; ab.disabled=entries.length>=4;
+    ab.onclick=function(){entries.push(E(2,89));clearPreset();render();};
+    add.appendChild(ab); host.appendChild(add);
+
+    document.getElementById("fatsize").textContent="fatSize "+(entries.length*3176)+" bytes";
+    document.getElementById("targetname").textContent="target sm_"+TARGET.sm;
+
+    var res=document.getElementById("result"), sub=document.getElementById("resultsub");
+    if(!r.best){
+      res.textContent="Nothing runs"; res.setAttribute("data-tone","none");
+      sub.textContent="No entry survives the candidate filter, so the load fails with CUDA_ERROR_NO_BINARY_FOR_GPU.";
+    } else if(r.best.e.b16){
+      res.textContent="Refused at load"; res.setAttribute("data-tone","none");
+      sub.textContent="Entry "+r.best.i+" wins selection, but bit 16 marks it obfuscated and the driver logs that the feature is not yet implemented.";
+    } else {
+      res.textContent="Entry "+r.best.i+" executes"; res.removeAttribute("data-tone");
+      sub.textContent=archLabel(r.best.e)+", kind "+KIND[r.best.e.kind]+". Every other entry is dead code a scanner may still report.";
+    }
+
+    var used={};
+    Object.keys(r.why).forEach(function(k){used[r.why[k].lv]=true;});
+    var LV=[
+      ["0","compatibility","Entries the GPU cannot run leave the candidate set."],
+      ["1","kind","ELF beats 0x10 beats PTX, whatever the architecture says."],
+      ["2","architecture","Nearest compatible wins, independent of file order."],
+      ["3","flag bit 24","Among tied cubins, the entry without bit 24 wins."],
+      ["4","file order","Cubins: the first wins. PTX: the last wins."]
+    ];
+    var ol=document.getElementById("levels"); ol.innerHTML="";
+    LV.forEach(function(l,n){
+      var li=document.createElement("li");
+      li.setAttribute("data-active",used[n]?"true":"false");
+      li.innerHTML='<span class="lv">'+l[0]+'</span><span><span class="lv-name">'+l[1]+
+                   '</span><br><span class="lv-note">'+l[2]+'</span></span>';
+      ol.appendChild(li);
+    });
+  }
+
+  function clearPreset(){
+    document.querySelectorAll(".preset[data-preset]").forEach(function(b){b.setAttribute("aria-pressed","false");});
+  }
+  function load(name){
+    entries=PRESETS[name].map(function(e){return E(e.kind,e.arch,"",{b16:e.b16,b20:e.b20,b21:e.b21,b24:e.b24});});
+    if(name==="suffix")entries[0].b20=true;
+    clearPreset();
+    var btn=document.querySelector('.preset[data-preset="'+name+'"]');
+    if(btn)btn.setAttribute("aria-pressed","true");
+    render();
+  }
+  document.querySelectorAll(".preset[data-preset]").forEach(function(b){
+    b.onclick=function(){load(b.getAttribute("data-preset"));};
+  });
+  document.getElementById("forcejit").onchange=function(){clearPreset();render();};
+
+  load("cubin-beats-ptx");
+})();
+</script>
