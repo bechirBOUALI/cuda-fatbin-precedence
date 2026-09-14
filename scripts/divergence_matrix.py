@@ -59,6 +59,12 @@ CASES = [
     ("elfb_ptxa.fatbin",      "sm_89 ELF B + compute_89 PTX A",              {}),
     ("elf86a_ptx89b.fatbin",  "sm_86 ELF A + compute_89 PTX B",              {}),
     ("ptx89b_elf86a.fatbin",  "compute_89 PTX B + sm_86 ELF A",              {}),
+    # The architecture is stated twice and the two can disagree.
+    ("arch_hdr89_elf86.fatbin", "header sm_89, ELF e_flags sm_86",            {}),
+    ("arch_hdr86_elf89.fatbin", "header sm_86, ELF e_flags sm_89",            {}),
+    ("arch_hdr89_elf75.fatbin", "header sm_89, ELF e_flags sm_75",            {}),
+    ("arch_hdr75_elf89.fatbin", "header sm_75, ELF e_flags sm_89",            {}),
+    ("badelf_then_good.fatbin","bad-payload A then good B, no fallback",     {}),
     # Selection is not decided by the container alone.
     ("flag20_elfa.fatbin",    "one sm_89 ELF, flags bit 20 set",             {}),
     ("flag21_elfa.fatbin",    "one sm_89 ELF, flags bit 21 set",             {}),
@@ -91,17 +97,35 @@ def variant_table():
 CUBIN_BY_HASH = variant_table()
 
 
+def marker_in_sass(payload):
+    """Recover the variant from the immediate baked into the compiled SASS.
+
+    Hashing identifies an untouched payload, but several corpus entries edit
+    the cubin on purpose, which changes the hash while leaving the kernel
+    intact. The marker itself still runs, so read that instead of reporting the
+    entry as unidentifiable.
+    """
+    for marker, name in ((b"\xaa\xaa", "variant_a"), (b"\xbb\xbb", "variant_b")):
+        needle = bytes.fromhex("02780500") + marker + bytes.fromhex("0000000f")
+        if needle in payload:
+            return name
+    return None
+
+
 def identify(entry):
     """Name the variant an entry carries.
 
-    Cubins are matched by payload hash against the standalone files. PTX cannot
-    be, because fatbinary rewrites the text slightly, so the marker constant is
-    read out of the source instead: 0xAAAA is 43690 and 0xBBBB is 48059.
+    Cubins are matched by payload hash against the standalone files, falling
+    back to the SASS marker for payloads the corpus edits deliberately. PTX
+    cannot be hashed against anything, because fatbinary rewrites the text
+    slightly, so the marker constant is read out of the source instead:
+    0xAAAA is 43690 and 0xBBBB is 48059.
     """
     if not entry.payload:
         return "?"
     if entry.payload.startswith(b"\x7fELF"):
-        return CUBIN_BY_HASH.get(entry.payload_sha256, "unknown cubin")
+        known = CUBIN_BY_HASH.get(entry.payload_sha256)
+        return known or marker_in_sass(entry.payload) or "unknown cubin"
     text = entry.payload.decode("utf-8", "replace")
     if "43690" in text:
         return "variant_a"
@@ -121,6 +145,10 @@ def run_driver(path, env_extra):
     if proc.returncode != 0:
         if "CUDA_ERROR_NO_BINARY_FOR_GPU" in proc.stderr:
             return NOTHING
+        if "CUDA_ERROR_INVALID_SOURCE" in proc.stderr:
+            # Selected, then rejected when the payload was actually read. The
+            # distinction from NO_BINARY_FOR_GPU is what shows selection ran.
+            return "rejected at load"
         return f"load error ({proc.returncode})"
     for token in ("variant_a", "variant_b"):
         if token in proc.stdout:
@@ -155,7 +183,9 @@ def main():
         first = name(fp.naive_first_match(entries, args.sm))
         exact = name(fp.naive_exact_arch(entries, args.sm))
         ptxish = name(fp.naive_prefer_ptx(entries, args.sm))
-        aware = name(fp.would_execute(entries, args.sm, policy))
+        winner = fp.would_execute(entries, args.sm, policy)
+        aware = ("rejected at load" if fp.payload_rejected(winner, args.sm)
+                 else name(winner))
 
         for label, value in (("first-match", first), ("exact-arch", exact),
                              ("prefer-PTX", ptxish), ("precedence-aware", aware)):

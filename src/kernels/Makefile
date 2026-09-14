@@ -218,6 +218,30 @@ $(BUILD)/b24_on_first.fatbin: $(BUILD)/elf_ab.fatbin
 $(BUILD)/b24_on_second.fatbin: $(BUILD)/elf_ab.fatbin
 	python3 $(PATCH) $< $@ --entry 1 --set-bit 24
 
+# A cubin entry states its architecture twice, in the entry header at +0x1c and
+# in the embedded ELF's e_flags, and nothing makes the two agree. These four set
+# them in conflict, in both directions, with a compatible partner and with an
+# incompatible one. No size, offset or magic changes.
+ARCHPATCH := ../../scripts/patch_arch.py
+
+$(BUILD)/arch_hdr89_elf86.fatbin: $(BUILD)/single_elf_a.fatbin
+	python3 $(ARCHPATCH) $< $@ --elf-arch 86
+
+$(BUILD)/arch_hdr86_elf89.fatbin: $(BUILD)/single_elf_a.fatbin
+	python3 $(ARCHPATCH) $< $@ --header-arch 86
+
+$(BUILD)/arch_hdr89_elf75.fatbin: $(BUILD)/single_elf_a.fatbin
+	python3 $(ARCHPATCH) $< $@ --elf-arch 75
+
+$(BUILD)/arch_hdr75_elf89.fatbin: $(BUILD)/single_elf_a.fatbin
+	python3 $(ARCHPATCH) $< $@ --header-arch 75
+
+# Selection commits. Entry 0 is selectable by its header but carries an ELF for
+# the wrong generation, and entry 1 is a perfectly good sm_89 cubin. If the
+# driver retried after a rejected payload, B would run. It does not.
+$(BUILD)/badelf_then_good.fatbin: $(BUILD)/elf_ab.fatbin
+	python3 $(ARCHPATCH) $< $@ --entry 0 --elf-arch 75
+
 # What a static scanner reports for each artifact. Compare against what the
 # harness observes at runtime; any disagreement is the finding.
 list: $(FATBINS)

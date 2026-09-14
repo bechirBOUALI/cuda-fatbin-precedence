@@ -11,7 +11,7 @@ This repository measures the rule, confirms it against the driver's own code,
 and implements it.
 
 **Start with [WRITEUP.md](WRITEUP.md).** It is the whole argument in one place,
-in about 2600 words, with the decompiled C for the selection path.
+in about 3200 words, with the decompiled C for the selection path.
 
 ## The rule, in short
 
@@ -31,15 +31,15 @@ present, and nothing in the PTX says so. `cuobjdump` lists both. An sm_86 cubin
 beats an exactly matching compute_89 PTX on an sm_89 GPU, because kind decides
 first.
 
-Measured against the GPU on 24 containers built to conflict, and on 343
+Measured against the GPU on 29 containers built to conflict, and on 343
 containers in NVIDIA's own shipped libraries:
 
 | reading | wrong, built corpus | wrong, shipped libraries |
 |---|---|---|
-| first entry not exceeding the GPU | 12 of 24 | 342 of 343 |
-| first entry matching the GPU exactly | 12 of 24 | 195 of 343 |
-| the first PTX entry | 13 of 24 | 342 of 343 |
-| the driver's rule, `would_execute()` | 0 of 24 | reference |
+| first entry not exceeding the GPU | 15 of 29 | 342 of 343 |
+| first entry matching the GPU exactly | 15 of 29 | 195 of 343 |
+| the first PTX entry | 16 of 29 | 342 of 343 |
+| the driver's rule, `would_execute()` | 0 of 29 | reference |
 
 None of this needs a crafted file. An ordinary `nvcc -arch=sm_89 -c` already
 emits a container whose PTX entry cannot run, and `cuobjdump` lists it without
@@ -52,7 +52,10 @@ reports that target, so the container does not load. And with
 `CUDA_FORCE_PTX_JIT=1` the PTX entry wins instead, so the same bytes run
 different code on different hosts.
 
-Flag bit 24 decides between two otherwise equal cubins, and the entry without
+A cubin states its architecture twice, in the entry header and in the embedded
+ELF, and the two can disagree: selection reads the header and validation reads
+the ELF, while `cuobjdump` reports one through `-lelf` and the other through
+`-elf`. Flag bit 24 decides between two otherwise equal cubins, and the entry without
 it wins, so setting that one bit on the first of two entries makes the second
 one execute.
 

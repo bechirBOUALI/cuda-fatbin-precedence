@@ -184,10 +184,16 @@ read the magic, `headerSize`, and `fatSize`, then jump by `headerSize + fatSize`
 
 ## Open questions
 
-- Only two entries tested. Does the rule hold at three or more?
-- Untested conflict cases from the plan: entry-header architecture disagreeing
-  with the embedded ELF's `e_flags`, a payload hidden in `padded_payload_size`
-  slack, and an entry positioned past the declared `fatbin_size`.
+*Status updated 2026-09-14. Two of these are now closed; see the note at the
+end of this file.*
+
+- ~~Only two entries tested. Does the rule hold at three or more?~~ **Closed:**
+  it holds at three, in both directions.
+- ~~Entry-header architecture disagreeing with the embedded ELF's
+  `e_flags`.~~ **Closed:** selection uses the header, the ELF is validated
+  afterwards, and the two can disagree silently.
+- **Still open:** a payload hidden in `padded_payload_size` slack, and an entry
+  positioned past the declared `fatbin_size`.
 
 ## Addendum: the positional rule reverses for PTX
 
@@ -275,3 +281,68 @@ entry can run is present in one output and absent from the other, and the one
 that omits it is the listing a tool parses.
 
 Details and the instruction-level evidence are in `driver-selection-logic.md`.
+
+
+## Closing two open questions, 2026-09-14
+
+### The rule holds at three entries
+
+Containers with three ELF entries at sm_75, sm_80 and sm_86 were measured in
+both orders on an sm_89 GPU. The sm_86 entry wins from either end, so
+architecture proximity is order-independent at three entries and not just at
+two. The earlier result was not an artefact of testing pairs.
+
+### The architecture is stated twice, and the two fields can disagree
+
+A cubin entry declares its architecture in the fat binary entry header at
+`+0x1c`, and again inside the embedded ELF, in `e_flags`. Nothing makes them
+agree. Patching one and leaving the other gives four measured outcomes:
+
+| entry header | embedded ELF | result |
+|---|---|---|
+| sm_89 | sm_86 | runs |
+| sm_86 | sm_89 | runs |
+| sm_89 | sm_75 | `CUDA_ERROR_INVALID_SOURCE` |
+| sm_75 | sm_89 | `CUDA_ERROR_NO_BINARY_FOR_GPU` |
+
+The two different error codes are the finding. A header claiming an
+unselectable architecture yields "no binary for GPU": the entry was never a
+candidate and its payload was never read. A header claiming a selectable
+architecture over a payload for the wrong generation yields "invalid source":
+the entry was chosen, and only then was the ELF looked at and refused.
+
+**Selection reads the header. Validation reads the ELF. In that order.**
+
+Where both values are individually runnable the mismatch is tolerated in
+silence, which is the first two rows. And `cuobjdump` reports the two fields
+through different flags, so it contradicts itself on the same entry:
+
+| container | `cuobjdump -lelf` | `cuobjdump -elf` |
+|---|---|---|
+| unmodified | sm_89 | sm_89 |
+| header sm_89, ELF sm_86 | sm_86 | sm_89 |
+| header sm_86, ELF sm_89 | sm_89 | sm_86 |
+
+The entry listing reports the ELF's value; the ELF dump reports the header's.
+The listing is the machine-readable output a tool is most likely to parse, and
+it is the one showing the field selection does not use.
+
+### Selection commits, and there is no fallback
+
+Put a bad payload first and a good one second: entry 0 selectable by its header
+but carrying an ELF for the wrong generation, entry 1 an ordinary sm_89 cubin.
+The load fails with `CUDA_ERROR_INVALID_SOURCE`. The driver does not retry with
+the next candidate. One entry is chosen and that decision is final, which is
+worth stating because "best matching" suggests otherwise.
+
+### Method note on `e_flags`
+
+Where the SM number sits inside `e_flags` depends on the cubin ELF ABI version
+in byte 8 of `e_ident`, and assuming one layout invents disagreements that are
+not there. Version 8, which the CUDA 13.2 toolkit emits, puts it in bits 8 to
+15, so sm_89 is `0x06005904`. Version 7, which the cubins inside NVIDIA's own
+shipped libraries use, puts it in bits 16 to 23, so sm_75 is `0x004b054b`.
+A first attempt at this check assumed the version 8 layout and reported three
+shipped libraries as mismatched; all three were false positives. The parser now
+keys on the ABI version and declines to check an unrecognised one, on the view
+that a missed disagreement is better than an invented one.

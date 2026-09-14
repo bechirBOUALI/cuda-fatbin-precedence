@@ -214,6 +214,45 @@ class Entry:
         # is exactly the kind of aliasing an attester must not have.
         self.payload_sha256 = hashlib.sha256(self.payload).hexdigest() if self.payload else None
         self.stride = hdr.header_size + hdr.payload_size
+        self.elf_arch = self.read_elf_arch()
+        if self.elf_arch is not None and self.elf_arch != self.arch:
+            self.notes.append(
+                f"architecture disagreement: entry header says {self.arch}, "
+                f"embedded ELF e_flags says {self.elf_arch}. The driver selects "
+                f"on the header; cuobjdump -lelf reports the ELF value")
+
+    def read_elf_arch(self):
+        """The SM number the embedded ELF claims for itself, or None.
+
+        A cubin entry states its architecture twice and nothing makes the two
+        agree. The driver selects on the entry header and only afterwards
+        validates the ELF, so the fields can differ without the container
+        failing, as long as the ELF is still loadable on the GPU that was
+        selected for. cuobjdump's entry listing reports this value while its
+        ELF dump reports the header value, so the two disagree on the same
+        entry and a tool reading the listing is reading the field selection
+        does not use.
+
+        Where the SM number sits inside e_flags depends on the cubin ELF ABI
+        version, byte 8 of e_ident, and getting this wrong invents
+        disagreements that are not there:
+
+            abiver 7 (osabi 51)   arch in bits 16..23   sm_75 is 0x004b054b
+            abiver 8 (osabi 65)   arch in bits  8..15   sm_89 is 0x06005904
+
+        Both layouts occur in ordinary files: the CUDA 13.2 toolkit emits
+        abiver 8, while cubins inside its own shipped libraries are abiver 7.
+        An unrecognised version returns None and is not checked, because a
+        false disagreement is worse than a missed one.
+        """
+        if len(self.payload) < 0x34 or not self.payload.startswith(b"\x7fELF"):
+            return None
+        abiver = self.payload[8]
+        shift = {7: 16, 8: 8}.get(abiver)
+        if shift is None:
+            return None
+        flags, = struct.unpack_from("<I", self.payload, 0x30)
+        return (flags >> shift) & 0xFF
 
     def read_strings(self, blob):
         """Recover the identifier and the ptxas options string.
@@ -504,6 +543,25 @@ def would_execute(entries, sm, policy="default", suffix=""):
     return best
 
 
+def payload_rejected(entry, sm):
+    """Would the driver refuse this entry's payload once it actually reads it?
+
+    Selection and validation are separate steps, and the error codes prove the
+    order: an entry whose header claims a selectable architecture but whose
+    embedded ELF claims an incompatible one is chosen and then rejected with
+    CUDA_ERROR_INVALID_SOURCE, while an entry whose header is unselectable
+    never gets that far and yields CUDA_ERROR_NO_BINARY_FOR_GPU.
+
+    There is no fallback. Selection commits to one entry, so a container whose
+    chosen entry is rejected fails to load even when a perfectly good entry for
+    the same GPU sits directly after it. That is worth stating because it is
+    the opposite of what "best matching" suggests.
+    """
+    if entry is None or entry.kind != KIND_ELF or entry.elf_arch is None:
+        return False
+    return entry.elf_arch // 10 != sm // 10 or entry.elf_arch > sm
+
+
 def naive_first_match(entries, sm):
     """What a conventional scanner reports: the first entry that looks like it
     matches the GPU. This is the baseline `would_execute` is compared against,
@@ -561,6 +619,7 @@ def describe(path, sm, policy, suffix=""):
             "sm": sm,
             "target": f"sm_{sm}{suffix}",
             "would_execute": winner.index if winner else None,
+            "rejected_at_load": payload_rejected(winner, sm),
             "naive_first_match": first.index if first else None,
             "naive_exact_arch": exact.index if exact else None,
             "naive_prefer_ptx": ptxish.index if ptxish else None,
@@ -579,6 +638,7 @@ def describe(path, sm, policy, suffix=""):
                 "decompressed_size": e.hdr.decompressed_size,
                 "flags": f"{e.flags:#x}",
                 "arch_suffix": e.arch_suffix,
+                "elf_arch": e.elf_arch,
                 "deprioritised": e.deprioritised,
                 "identifier": e.ident,
                 "ptxas_options": e.ptxas_options,
@@ -612,6 +672,9 @@ def print_report(containers):
                 print(f"       note: {n}")
         if c["would_execute"] is None:
             print("   no entry is selectable: this container will not load")
+        elif c["rejected_at_load"]:
+            print("   the selected entry will be refused when its payload is read, "
+                  "and the driver does not fall back to another entry")
         naive = c["naive_first_match"]
         if naive is not None and naive != c["would_execute"]:
             print(f"   DIVERGENCE: first-match scanner reports entry {naive}, "

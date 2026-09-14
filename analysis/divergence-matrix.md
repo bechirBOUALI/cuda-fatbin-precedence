@@ -44,6 +44,11 @@ from the bytes alone.
 | sm_89 ELF B + compute_89 PTX A | **variant_b** | variant_b | variant_b | variant_a (wrong) | variant_b |
 | sm_86 ELF A + compute_89 PTX B | **variant_a** | variant_a | variant_b (wrong) | variant_b (wrong) | variant_a |
 | compute_89 PTX B + sm_86 ELF A | **variant_a** | variant_b (wrong) | variant_b (wrong) | variant_b (wrong) | variant_a |
+| header sm_89, ELF e_flags sm_86 | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| header sm_86, ELF e_flags sm_89 | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| header sm_89, ELF e_flags sm_75 | **rejected at load** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | rejected at load |
+| header sm_75, ELF e_flags sm_89 | **nothing runs** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | nothing runs |
+| bad-payload A then good B, no fallback | **rejected at load** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | rejected at load |
 | one sm_89 ELF, flags bit 20 set | **nothing runs** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | nothing runs |
 | one sm_89 ELF, flags bit 21 set | **nothing runs** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | nothing runs |
 | one sm_89 ELF, flags bit 24 set | **variant_a** | variant_a | variant_a | variant_a | variant_a |
@@ -51,12 +56,12 @@ from the bytes alone.
 | ELF A + ELF B, bit 24 on B only | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 | PTX A + ELF B, CUDA_FORCE_PTX_JIT=1 | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 
-24 containers, each one measured on the GPU.
+29 containers, each one measured on the GPU.
 rows where the reading disagrees with what executed:
-  first-match        12 / 24
-  exact-arch         12 / 24
-  prefer-PTX         13 / 24
-  precedence-aware    0 / 24
+  first-match        15 / 29
+  exact-arch         15 / 29
+  prefer-PTX         16 / 29
+  precedence-aware    0 / 29
 
 Reproduce with:
 
@@ -99,7 +104,22 @@ PTX in both orders, and an sm_86 ELF beats an exactly matching compute_89 PTX.
 Row 17 is what breaks exact-arch: the entry whose architecture matches
 perfectly is the one that does not run.
 
-**Rows 19 to 23, the flags field decides two different things.** A
+**Rows 19 to 23, the architecture is stated twice.** A cubin declares its
+architecture in the entry header and again in the embedded ELF's `e_flags`,
+and nothing makes them agree. Selection reads the header and validation reads
+the ELF, in that order, which the two distinct error codes prove: an
+unselectable header gives "no binary for GPU" and the payload is never read,
+while a selectable header over a wrong-generation payload gives "invalid
+source". Where both values are individually runnable the mismatch passes in
+silence. Row 23 adds that selection commits: a rejected payload does not fall
+back to the good entry sitting right after it.
+
+`cuobjdump` reports the two fields through different flags and so contradicts
+itself on the same entry, with `-lelf` showing the ELF value and `-elf` the
+header value. The listing, which is what a tool parses, is the one showing the
+field selection does not use.
+
+**Rows 24 to 28, the flags field decides two different things.** A
 structurally perfect sm_89 cubin with a single bit of the entry `flags` field
 set. Bits 20 and 21 are the architecture-name suffix, `a` and `f`, the same
 ones `nvcc` exposes as `sm_90a` and `sm_100f`, so setting bit 20 here makes the
@@ -114,17 +134,17 @@ tool parses, so all three conventional readings report a kernel that cannot
 run. The parser prints the suffix in its architecture column and accepts
 `--target sm_89a` to model a host that would ask for it.
 
-Rows 22 and 23 are a different bit and a different mechanism. Bit 24 separates
+Rows 27 and 28 are a different bit and a different mechanism. Bit 24 separates
 two cubins that tie on kind and architecture, and the entry **without** it
 wins. Two sm_89 cubins in the order A then B normally give A, because it is
 first; setting bit 24 on A alone gives B instead, and setting it on B alone
 changes nothing. That was predicted from the ranker's decompiled tail and then
 measured, and it means one bit reverses which of two same-architecture kernels
 executes while every size, offset, magic and architecture field stays correct.
-Row 21 shows why the single-entry test had looked inert: with nothing to tie
+Row 26 shows why the single-entry test had looked inert: with nothing to tie
 against, the tie-break never runs.
 
-**Row 24, the host decides too.** The same bytes as row 15, on a host with
+**Row 29, the host decides too.** The same bytes as row 15, on a host with
 `CUDA_FORCE_PTX_JIT=1`. The PTX entry runs instead of the ELF. No reading of
 the file alone can be right for both hosts, so a precedence-aware parser has to
 take the host policy as an input, which `would_execute()` does.

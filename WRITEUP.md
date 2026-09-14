@@ -210,16 +210,16 @@ build-specific. The full decompilation is in
 
 ## What a static reading gets wrong
 
-Twenty-four containers, each one loaded on the GPU so that what executed is
+Twenty-nine containers, each one loaded on the GPU so that what executed is
 measured rather than predicted, compared against three conventional static
 readings.
 
 | reading | wrong on |
 |---|---|
-| first-match, first entry not exceeding the GPU | 12 of 24 |
-| exact-arch, first entry matching the GPU exactly | 12 of 24 |
-| prefer-PTX, read the text because it is text | 13 of 24 |
-| precedence-aware, the rule above | 0 of 24 |
+| first-match, first entry not exceeding the GPU | 15 of 29 |
+| exact-arch, first entry matching the GPU exactly | 15 of 29 |
+| prefer-PTX, read the text because it is text | 16 of 29 |
+| precedence-aware, the rule above | 0 of 29 |
 
 The full matrix, row by row with what each row establishes, is in
 `analysis/divergence-matrix.md`.
@@ -265,6 +265,30 @@ and magic correct, produces a container that loads and runs the altered kernel.
 Nothing validates entry contents, so an entry can be substituted as well as
 mis-selected.
 
+## The architecture is stated twice
+
+A cubin entry declares its architecture in the fat binary entry header, and
+again inside the embedded ELF in `e_flags`. Nothing makes the two agree, and
+patching one while leaving the other shows which field does what. A header
+claiming an unselectable architecture gives `CUDA_ERROR_NO_BINARY_FOR_GPU`: the
+entry was never a candidate and its payload was never read. A header claiming a
+selectable architecture over a payload for the wrong generation gives
+`CUDA_ERROR_INVALID_SOURCE`: the entry was chosen, and only then was the ELF
+looked at and refused. Selection reads the header, validation reads the ELF, in
+that order.
+
+Where both values are individually runnable, the mismatch passes in silence and
+the container runs. Meanwhile `cuobjdump` reports the two fields through
+different flags and contradicts itself on the same entry: `-lelf` prints the
+ELF's value, `-elf` prints the header's. The listing is the machine-readable
+output a tool is most likely to parse, and it is the one showing the field
+selection does not use.
+
+Selection also commits. Put an entry with a wrong-generation payload first and
+a perfectly good sm_89 cubin second, and the load fails rather than falling back
+to the good one. One entry is chosen and that decision is final, which is worth
+knowing because "best matching" suggests otherwise.
+
 ## Two things that are not in the container at all
 
 **The architecture is a name, and the listing drops half of it.** Two bits of
@@ -300,7 +324,7 @@ assuming the local GPU, and takes the host policy as an argument so the
 `CUDA_FORCE_PTX_JIT` case is a parameter and not a second code path. It reads a raw container, a shared
 library or executable through the registration wrappers, and a relocatable
 object by walking `.nv_fatbin` directly, since in an object file the wrapper's
-pointer is not filled in until link time. It agrees with the driver on all twenty-four
+pointer is not filled in until link time. It agrees with the driver on all twenty-nine
 measured containers, including the two where the right answer is that nothing
 runs.
 
@@ -344,8 +368,9 @@ Open items: kinds 0x10, 0x20 and 0x80 appear in the driver's code and could
 not be produced with the toolkit's creation API, so their meaning is unknown;
 kind 0x100 is a group entry NVIDIA's header says cannot currently be created;
 several of the selector's policy values are visible in the jump table but
-unidentified; and whether the entry-header architecture can be made to
-disagree with the embedded ELF's `e_flags` has not been tested.
+unidentified; and two conflict cases remain untested, a payload hidden
+in the slack when the declared payload size exceeds the real one, and an entry
+positioned past the declared container size.
 
 ## Reproducing
 
