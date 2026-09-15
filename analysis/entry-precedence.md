@@ -269,8 +269,13 @@ The full corpus, measured against the GPU row by row, is in
 `divergence-matrix.md`. The driver code behind these rules is in
 `driver-selection-logic.md` and `decompiled-selection.md`.
 
-## Open
+## Settled elsewhere
 
-Two conflict cases remain untested: a payload hidden in the slack when the
-declared payload size exceeds the real one, and an entry positioned past the
-declared container size.
+Two conflict cases were open in earlier versions of this document: a payload
+hidden in the slack when the declared payload size exceeds the real one, and an
+entry positioned past the declared container size. Both are measured in
+`size-fields.md`. The short answer is that neither size field is a length:
+`payload_size` advances the walk without bounding the read, so two containers
+declaring byte-identical payloads run different kernels, and `fat_size` is
+truncated to a signed 32-bit value and only has to contain an entry's first
+byte, so an entry lying outside the declared container executes.

@@ -34,6 +34,8 @@ Every finding below lies beneath that line.
 | 10 | Decompression is keyed by a flag bit rather than by entry kind, and the decompressed size is not where format notes place it | [driver-selection-logic](analysis/driver-selection-logic.md) |
 | 11 | Entry kinds 0x20, 0x80 and 0x100 are `index`, `tile ir` and `contatenated entry`, NVIDIA's own spelling | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 | 12 | Kind 0x10 is an ELF the driver finalizes before load. **Inference**, not confirmed: NVIDIA names it nowhere | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
+| 13 | `payload_size` advances the walk but does not bound the read: PTX is read to the first NUL, an ELF to the extent its own headers describe. Two containers declaring byte-identical payloads run different kernels | [size-fields](analysis/size-fields.md) |
+| 14 | `fat_size` is truncated to a signed 32-bit value, and an entry is walked when its **start** is inside it, so an entry lying outside the declared container executes | [size-fields](analysis/size-fields.md) |
 
 The illustration below shows rows 1 to 3 as the driver applies them, one
 container narrowed to one kernel:
@@ -102,8 +104,8 @@ Knowing the rule is what closes the gap. A tool that reproduces the driver's
 precedence can point at the entry that will actually execute, hash that one,
 disassemble that one, and say plainly when a container has no runnable entry at
 all. That is what `would_execute()` does, and
-[divergence-matrix](analysis/divergence-matrix.md) is how it was checked: 28
-containers built to put the rules in conflict, measured as 29 cases because one
+[divergence-matrix](analysis/divergence-matrix.md) is how it was checked: 40
+containers built to put the rules in conflict, measured as 41 cases because one
 is loaded under two host policies, each one run on a real GPU, with the rule
 agreeing with hardware on every one.
 
@@ -119,8 +121,10 @@ findings sit in.
 
 Nothing here is an attack on that supply chain, and none was demonstrated. The
 point is narrower: anything built to scan, hash or attest GPU code has to
-answer which entry actually runs before it can claim to have looked at the
-code.
+answer which entry actually runs, and which bytes are that entry, before it can
+claim to have looked at the code. Neither question is answered by the fields
+that appear to answer them: two containers declaring byte-identical payloads
+run different kernels here, measured on the GPU.
 
 ## What already exists, and where it stops
 
@@ -209,6 +213,12 @@ for each entry, whether the driver would execute it.
   `CUDA_FORCE_PTX_JIT` host are parameters rather than separate code paths.
 - **It hashes the decompressed payload**, so identical device code cannot hash
   differently merely because a compression setting changed.
+- **It hashes the extent the driver reads**, not the declared payload, which is
+  what stops two containers with byte-identical declared bytes from hashing the
+  same while running different kernels.
+- **It walks the container the way the driver does**, with `fat_size` truncated
+  to a signed 32-bit value and an entry counted as present when its start is
+  inside, so entries that lie outside the declared container are not missed.
 - **It decompresses on the flag, not the kind**, which is what stops compressed
   cubins from being read as garbage.
 - **It flags an architecture disagreement** between the entry header and the
@@ -217,8 +227,10 @@ for each entry, whether the driver would execute it.
 - **It reports an obfuscated entry as a distinct outcome**, not as an entry
   with no code, which is how the shipped tooling presents it.
 
-All 343 shipped containers parse with no structural complaint, so it is
-exercised on real code and not only on its own corpus.
+342 of the 343 shipped containers parse with no structural complaint, so it is
+exercised on real code and not only on its own corpus. The exception is one PTX
+entry in `libcufile` compressed by a scheme this parser does not decode, which
+it reports rather than hashing as though it were code.
 
 ## Reproducing
 
@@ -241,7 +253,7 @@ mistaken for a fresh selection decision. The matrix script sets it itself.
 ```
 SELECTION-RULE.md   the argument end to end
 docs/               the selection walkthrough as a GIF and as two live pages
-analysis/           the evidence behind each finding above
+analysis/           the evidence behind each finding above, size fields included
 scripts/            the selector, the divergence matrix, the library survey
 src/                test kernels and a minimal Driver API loader
 probes/             programs that identify entry kinds via libnvfatbin
@@ -255,7 +267,7 @@ The driver reverse engineering was done on the same build, so both halves agree
 on version, and the addresses are build-specific: they will not survive a
 driver update.
 
-Nothing here is a driver vulnerability. The driver applies its own rule
-correctly and consistently; the gap is between that rule and the one a
+No selection behaviour here is a driver vulnerability. The driver applies its
+own rule correctly and consistently; the gap is between that rule and the one a
 convenient static reading uses, and it lives in the tooling. Every payload in
 this repository writes a marker value and nothing else.

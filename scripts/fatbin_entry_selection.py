@@ -200,6 +200,35 @@ FIXED_ENTRY_HEADER = 0x40
 assert ctypes.sizeof(FatBinEntryHeader) == FIXED_ENTRY_HEADER
 
 
+def elf_extent(blob, start, avail):
+    """How far into the buffer a 64-bit ELF's own headers reach, or None.
+
+    Used to find the bytes the driver reads beyond an entry's declared payload
+    size. Every offset is bounds-checked, since these fields are exactly what a
+    crafted container controls.
+    """
+    if avail < 0x40 or bytes(blob[start:start + 4]) != b"\x7fELF":
+        return None
+    try:
+        (e_phoff, e_shoff) = struct.unpack_from("<QQ", blob, start + 0x20)
+        (e_phentsize, e_phnum, e_shentsize, e_shnum) = struct.unpack_from(
+            "<HHHH", blob, start + 0x36)
+    except struct.error:
+        return None
+    reach = 0x40
+    reach = max(reach, e_phoff + e_phentsize * e_phnum)
+    reach = max(reach, e_shoff + e_shentsize * e_shnum)
+    for i in range(min(e_shnum, 512)):
+        off = start + e_shoff + i * e_shentsize
+        if e_shentsize < 0x40 or off + 0x40 > len(blob):
+            break
+        sh_type, = struct.unpack_from("<I", blob, off + 4)
+        sh_offset, sh_size = struct.unpack_from("<QQ", blob, off + 0x18)
+        if sh_type != 8:                      # SHT_NOBITS occupies no bytes
+            reach = max(reach, sh_offset + sh_size)
+    return reach if 0 < reach <= avail else None
+
+
 class Entry:
     """One fat binary entry, with its payload resolved and hashed."""
 
@@ -237,7 +266,14 @@ class Entry:
                 f"payload truncated: header declares {hdr.payload_size} bytes, "
                 f"{len(stored)} present")
         self.stored_payload = stored
-        self.payload = self.decompress(stored)
+        self.declared_payload = self.decompress(stored)
+        self.declared_sha256 = (hashlib.sha256(self.declared_payload).hexdigest()
+                                if self.declared_payload else None)
+
+        # payload_size is a STRIDE field, not a content length, and the driver
+        # does not use it to bound what it reads. Resolve the extent the driver
+        # actually consumes, per kind, and hash that. See resolve_extent.
+        self.payload = self.resolve_extent(blob, start)
 
         # Hash the DECOMPRESSED payload. Hashing the stored bytes would make the
         # same device code hash differently depending only on compression, which
@@ -250,6 +286,81 @@ class Entry:
                 f"architecture disagreement: entry header says {self.arch}, "
                 f"embedded ELF e_flags says {self.elf_arch}. The driver selects "
                 f"on the header; cuobjdump -lelf reports the ELF value")
+
+    def resolve_extent(self, blob, start):
+        """The bytes the driver actually reads for this entry.
+
+        `payload_size` advances the walk. It does not bound the read, and the
+        two differ in both directions, which is what breaks a tool that hashes
+        `payload[0 : payload_size]`:
+
+          PTX   the payload is read as a NUL-terminated string. An entry
+                declaring zero bytes still compiles and runs a full kernel, and
+                two containers whose declared bytes are byte-identical can run
+                different code.
+          ELF   the embedded ELF's own headers decide what is read, so bytes
+                past the declared payload still change the outcome: the same
+                declared bytes load or fail depending on a tail the declared
+                size excludes.
+
+        Both directions are recorded as notes, because a hash taken over the
+        wrong extent is wrong silently.
+        """
+        if self.obfuscated:
+            return self.declared_payload
+
+        declared = self.hdr.payload_size
+
+        if self.kind in (KIND_PTX, KIND_RELOC_PTX):
+            if self.compressed:
+                text = self.declared_payload
+                cut = text.find(b"\x00")
+                return text if cut < 0 else text[:cut]
+            if self.hdr.compressed_size:
+                # A second compression indicator: compressed_size is set while
+                # flag 0x8000 is not. One PTX entry in the shipped libcufile is
+                # stored this way. The scheme is not zstd and is not decoded
+                # here, so the stored bytes stand and the NUL rule below, which
+                # applies to plain text, must not run on them.
+                self.notes.append(
+                    f"payload is compressed by a scheme this parser does not "
+                    f"decode: compressed_size {self.hdr.compressed_size} is set "
+                    f"while flag 0x8000 is not. The hash covers the stored "
+                    f"bytes, not the device code")
+                return self.declared_payload
+            cut = blob.find(b"\x00", start, len(blob))
+            end = len(blob) if cut < 0 else cut
+            if end - start > declared:
+                self.notes.append(
+                    f"PTX text runs {end - start - declared} bytes past the "
+                    f"declared payload_size: the driver reads to the first NUL, "
+                    f"so hashing the declared bytes hashes neither all nor only "
+                    f"the code that runs")
+            elif end - start < declared:
+                self.notes.append(
+                    f"declared payload_size covers {declared - (end - start)} "
+                    f"bytes past the PTX terminator, which the driver never "
+                    f"reads")
+            return bytes(blob[start:end])
+
+        if self.kind == KIND_ELF and not self.compressed:
+            reach = elf_extent(blob, start, len(blob) - start)
+            if reach is not None and reach != declared:
+                if reach > declared:
+                    self.notes.append(
+                        f"the embedded ELF describes {reach - declared} bytes "
+                        f"past the declared payload_size, and the driver reads "
+                        f"them: bytes outside the declared payload decide "
+                        f"whether this entry loads")
+                else:
+                    self.notes.append(
+                        f"the declared payload_size covers {declared - reach} "
+                        f"bytes past the end of the embedded ELF, which the "
+                        f"driver never reads. Anything in that gap, a whole "
+                        f"second cubin included, is carried by the container "
+                        f"and executed by nothing")
+                return bytes(blob[start:start + min(reach, len(blob) - start)])
+        return self.declared_payload
 
     def read_elf_arch(self):
         """The SM number the embedded ELF claims for itself, or None.
@@ -303,7 +414,14 @@ class Entry:
         """
         h = self.hdr
         base = self.offset
-        limit = h.header_size
+        # header_size is attacker-controlled and need not fit in the buffer, so
+        # clamp it before it is used as a bound. Trusting it crashes the parser
+        # on a crafted file, which is the failure this function warns about.
+        limit = min(h.header_size, max(0, len(blob) - base))
+        if limit < h.header_size:
+            self.notes.append(
+                f"header_size {h.header_size} extends past the end of the "
+                f"buffer; strings bounded to {limit} bytes instead")
 
         def grab(off, length, what):
             if length == 0:
@@ -319,7 +437,9 @@ class Entry:
         ident = grab(h.ident_offset, h.ident_length, "identifier")
 
         options = ""
-        if h.header_size > FIXED_ENTRY_HEADER and h.opts_desc_offset + 8 <= limit:
+        if (h.header_size > FIXED_ENTRY_HEADER
+                and h.opts_desc_offset + 8 <= limit
+                and base + h.opts_desc_offset + 8 <= len(blob)):
             oo, ol = struct.unpack_from(
                 "<II", blob, base + h.opts_desc_offset)
             options = grab(oo, ol, "ptxas options")
@@ -376,22 +496,75 @@ class Entry:
         return f"{prefix}{self.arch}{self.arch_suffix}"
 
 
-def parse_container(blob, offset=0):
-    """Parse one container at `offset`. Returns (FatBinHeader, [Entry]).
+class Container:
+    """A container header, plus the notes its walk produced.
 
-    The walk is bounded by the declared fat_size and additionally by the real
-    buffer length, and it refuses a zero stride. Without those two guards a
-    crafted container walks forever or off the end, which is precisely how a
-    scanner gets turned into a denial of service by the files it inspects.
+    Stands in for the raw header struct so that findings about the container
+    itself, rather than about one entry, have somewhere to live.
+    """
+
+    def __init__(self, hdr, offset):
+        self.version = hdr.version
+        self.header_size = hdr.header_size
+        self.fat_size = hdr.fat_size
+        self.offset = offset
+        self.notes = []
+        # The driver loads fat_size as a u64 and then truncates it to a signed
+        # 32-bit value before using it as the walk bound (`movslq %esi,%rax`).
+        # Reading it as a u64 disagrees with the driver by up to 2**64 - 2**32.
+        self.declared = ctypes.c_int32(hdr.fat_size & 0xFFFFFFFF).value
+
+
+def parse_container(blob, offset=0):
+    """Parse one container at `offset`. Returns (Container, [Entry]).
+
+    The walk reproduces the driver's bound rather than a reasonable one. Two
+    details decide which entries exist at all, and both were measured:
+
+      * the bound is the declared size truncated to a signed 32-bit value, so a
+        container declaring 0x800018d0 bytes is walked as a negative size and
+        no entry is reached;
+      * an entry is walked when its START lies inside that bound. Its header
+        and payload may extend past the end of the declared container, and the
+        driver reads them anyway, so an entry can execute while a size-honouring
+        reader does not see it at all.
+
+    Everything the walk has to clamp for its own safety, rather than because
+    the driver does, is recorded as a note instead of passing in silence.
     """
     hdr = FatBinHeader.from_buffer_copy(bytes(blob[offset:offset + 16]))
     if not hdr.is_valid():
         raise ValueError(f"no fat binary magic at offset {offset:#x}")
 
+    container = Container(hdr, offset)
+    declared = container.declared
+    first = offset + hdr.header_size
+
+    if hdr.fat_size >> 32:
+        container.notes.append(
+            f"fat_size declares {hdr.fat_size} bytes, but the driver truncates "
+            f"it to a signed 32-bit value, {declared}. The upper bits are "
+            f"discarded")
+    if hdr.fat_size and declared <= 0:
+        container.notes.append(
+            f"fat_size truncates to {declared}, which is not positive: the "
+            f"driver walks no entries and the container cannot load, however "
+            f"many entries a u64-reading parser finds")
+    if declared > 0 and first + declared > len(blob):
+        container.notes.append(
+            f"the declared container ends {first + declared - len(blob)} bytes "
+            f"past the end of this buffer. cuModuleLoadData takes a pointer "
+            f"with no length, so the driver reads whatever follows the caller's "
+            f"memory")
+
     entries = []
-    pos = offset + hdr.header_size
-    end = min(offset + hdr.header_size + hdr.fat_size, len(blob))
-    while pos + FIXED_ENTRY_HEADER <= end:
+    pos = first
+    while pos - first < declared:
+        if pos + FIXED_ENTRY_HEADER > len(blob):
+            container.notes.append(
+                f"entry {len(entries)} starts inside the declared container but "
+                f"its header runs past the end of this buffer")
+            break
         eh = FatBinEntryHeader.from_buffer_copy(
             bytes(blob[pos:pos + FIXED_ENTRY_HEADER]))
         if eh.header_size < FIXED_ENTRY_HEADER:
@@ -399,10 +572,29 @@ def parse_container(blob, offset=0):
         entry = Entry(len(entries), pos, eh, blob)
         entries.append(entry)
         if entry.stride == 0:
-            entry.notes.append("zero stride, walk stopped")
+            entry.notes.append(
+                "zero stride: the driver's walk never advances past this entry, "
+                "and cuModuleLoadData does not return")
             break
+        over = (pos + entry.stride) - (first + declared)
+        if over > 0:
+            entry.notes.append(
+                f"this entry extends {over} bytes past the end of the declared "
+                f"container. The driver walks it because its header starts "
+                f"inside; cuobjdump does not list it unless its whole 64-byte "
+                f"header fits")
         pos += entry.stride
-    return hdr, entries
+
+    if pos + FIXED_ENTRY_HEADER <= len(blob):
+        tail = FatBinEntryHeader.from_buffer_copy(
+            bytes(blob[pos:pos + FIXED_ENTRY_HEADER]))
+        if tail.kind in KIND_NAMES and tail.header_size >= FIXED_ENTRY_HEADER:
+            container.notes.append(
+                f"{len(blob) - pos} bytes after the last walked entry parse as "
+                f"a further entry header, kind {tail.kind:#x}, outside the "
+                f"declared container")
+
+    return container, entries
 
 
 def walk_nv_fatbin(raw, start, size):
@@ -651,6 +843,7 @@ def describe(path, sm, policy, suffix=""):
             "version": hdr.version,
             "header_size": hdr.header_size,
             "fat_size": hdr.fat_size,
+            "container_notes": hdr.notes,
             "policy": policy,
             "sm": sm,
             "target": f"sm_{sm}{suffix}",
@@ -695,6 +888,8 @@ def print_report(containers):
               f"header {c['header_size']}, fat_size {c['fat_size']}, "
               f"{len(c['entries'])} entries, target {c['target']}, "
               f"policy {c['policy']}")
+        for n in c.get("container_notes", []):
+            print(f"   container note: {n}")
         print(f"   {'#':>2}  {'kind':<9} {'arch':<11} {'payload':>8} "
               f"{'comp':<5} {'flags':<10} {'sha256':<16} runs")
         for e in c["entries"]:

@@ -224,16 +224,16 @@ quoted elsewhere here do not. Addresses are build-specific. The full decompilati
 
 The three readings below are not measurements of any shipping product. They are
 the plausible ways a tool could choose an entry, written so the driver's rule
-has something to be compared against. Twenty-eight containers, each one loaded
-on the GPU so that what executed is measured rather than predicted, and
-twenty-nine cases, because one container is loaded under two host policies.
+has something to be compared against. Forty containers, each one loaded on the
+GPU so that what executed is measured rather than predicted, and forty-one
+cases, because one container is loaded under two host policies.
 
 | How a tool picks the entry to inspect | Names an entry that did not run |
 |---|---|
-| first-match, the first entry the GPU could run | 15 of 29 |
-| exact-arch, the first exact architecture match | 15 of 29 |
-| prefer-PTX, read the text because it is text | 16 of 29 |
-| precedence-aware, the rule above | 0 of 29 |
+| first-match, the first entry the GPU could run | 17 of 41 |
+| exact-arch, the first exact architecture match | 17 of 41 |
+| prefer-PTX, read the text because it is text | 18 of 41 |
+| precedence-aware, the rule above | 0 of 41 |
 
 The full matrix, row by row with what each row establishes, is in
 `analysis/divergence-matrix.md`.
@@ -247,7 +247,7 @@ The evidence here is one step weaker, and the distinction is worth keeping.
 Those libraries carry no marker to read back, so nothing can be loaded and
 observed; each reading is compared against the precedence-aware rule rather
 than against hardware. That rule is not assumed correct, it is what the table
-above establishes, agreeing with the GPU on all 29 built containers.
+above establishes, agreeing with the GPU on all 40 built containers.
 
 | How a tool picks the entry to inspect | Disagrees with the driver's rule |
 |---|---|
@@ -366,6 +366,34 @@ is that an analysis sandbox and a production host can disagree about what a fat
 binary does without either being misconfigured, so the correct static answer is
 a function of the file and the host together.
 
+## The sizes are not lengths either
+
+Selecting the right entry is only half the question. The other half is which
+bytes are that entry, and the container's two size fields do not answer it.
+
+`payload_size` advances the walk and does not bound the read. A PTX payload is
+read to the first NUL however short the declared size is, and an ELF is read to
+the extent its own headers describe, which can be longer or shorter than the
+declared size. The consequence is measurable and blunt: two containers whose
+declared payload bytes are byte-identical, `sha256 5f9458539df4b732` on both,
+run different kernels on the GPU. A PTX entry declaring **zero** bytes of
+payload runs a complete kernel. A tool hashing `payload[0 : payload_size]`,
+which is the obvious implementation, therefore gives the same hash to different
+code and a different hash to the same code.
+
+`fat_size` bounds the walk, but the driver truncates it to a signed 32-bit
+value and an entry is walked when its **start** lies inside that bound. So an
+entry whose header and payload lie entirely past the end of the declared
+container executes, one byte of declared size decides whether it does, and
+`cuobjdump` will not list it because it requires the whole 64-byte entry header
+to fit. Between the two rules lies a 63-byte window in which the GPU runs an
+entry no NVIDIA tool reports.
+
+Neither of these needs a malformed file. Every container involved has correct
+magics, correct architectures and untouched payload bytes; only the size fields
+differ. The measurements, and what each reader sees for each case, are in
+`analysis/size-fields.md`.
+
 ## The fix
 
 `scripts/fatbin_entry_selection.py` reports, per entry, what it is and whether
@@ -377,7 +405,7 @@ than assuming the local GPU, and takes the host policy as an argument so the
 raw container, a shared library or executable through the registration
 wrappers, and a relocatable object by walking `.nv_fatbin` directly, since in
 an object file the wrapper's pointer is not filled in until link time. It
-agrees with the driver on all twenty-nine measured cases, including the two
+agrees with the driver on all forty-one measured cases, including the three
 where the right answer is that nothing runs.
 
 Three implementation details matter more than they look.
@@ -408,21 +436,26 @@ driver binary as well as measured, so they are expected to hold more broadly,
 but that is an expectation, and `would_execute` takes the architecture as an
 argument so the corpus can be re-run elsewhere.
 
-Nothing here is a driver vulnerability. The driver applies its own rule
-correctly and consistently. The gap is between that rule and the one a
+No selection behaviour here is a driver vulnerability. The driver applies its
+own rule correctly and consistently. The gap is between that rule and the one a
 convenient static reading uses, and it lives in the tooling, not in CUDA.
 
 Where it matters is an attacker who can ship a binary, which is the real supply
 chain for ML wheels and container images. It is not remote code execution.
 Every payload here writes a marker value and nothing else.
 
+Separately, containers whose declared sizes are malformed rather than merely
+misleading can make the driver refuse, fault or fail to return. Those cases are
+measured and are being reported to NVIDIA; they are deliberately not in this
+repository, and nothing above depends on them.
+
 Open items: kind 0x10 is an ELF the driver finalizes before load, on the
 evidence of a handler whose whole error vocabulary is NVIDIA's Mercury
-finalizer, but NVIDIA names it nowhere and that reading is an inference;
+finalizer, but NVIDIA names it nowhere and that reading is an inference; and
 several of the selector's policy values are visible in the jump table but
-unidentified; and two conflict cases remain untested, a payload hidden
-in the slack when the declared payload size exceeds the real one, and an entry
-positioned past the declared container size.
+unidentified. The two size questions that were open here, a payload hidden in
+the slack and an entry past the declared container size, are settled in
+`analysis/size-fields.md`.
 
 ## Reproducing
 
@@ -441,6 +474,6 @@ decision.
 The evidence behind each finding is in `analysis/`: the measured rules in
 `entry-precedence.md`, the full corpus in `divergence-matrix.md`, the driver
 code as disassembly in `driver-selection-logic.md` and as decompiled C in
-`decompiled-selection.md`, the entry kinds in `fatbin-entry-kinds.md`, the
-obfuscation feature in `ptx-obfuscation.md`, and what was already public in
-`prior-art.md`.
+`decompiled-selection.md`, the size fields in `size-fields.md`, the entry kinds
+in `fatbin-entry-kinds.md`, the obfuscation feature in `ptx-obfuscation.md`,
+and what was already public in `prior-art.md`.

@@ -59,14 +59,26 @@ each shortcut breaks, not how any particular scanner behaves.
 | one sm_89 ELF, flags bit 24 set | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 | ELF A + ELF B, bit 24 on A only | **variant_b** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | variant_b |
 | ELF A + ELF B, bit 24 on B only | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| PTX, 200 of 344 bytes declared | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| same 200 declared bytes, other kernel | **variant_b** | variant_b | variant_b | variant_b | variant_b |
+| PTX, 0 bytes declared | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| second cubin inside the declared payload | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| entry 0 declares away entry 1 | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| same, over the bit 24 tie-break | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| entry appended past the declared container | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| same, one byte more declared | **variant_b** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | variant_b |
+| fat_size 3176, entry 1 outside | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| fat_size 3177, entry 1 starts inside | **variant_b** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | variant_b |
+| fat_size 0x800018D0, negative as int32 | **nothing runs** | nothing runs | nothing runs | nothing runs | nothing runs |
+| fat_size 0x100000C68, low 32 bits used | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 | PTX A + ELF B, CUDA_FORCE_PTX_JIT=1 | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 
-29 cases over 28 containers, each one measured on the GPU.
+41 cases over 40 containers, each one measured on the GPU.
 rows where the reading disagrees with what executed:
-  first-match        15 / 29
-  exact-arch         15 / 29
-  prefer-PTX         16 / 29
-  precedence-aware    0 / 29
+  first-match        17 / 41
+  exact-arch         17 / 41
+  prefer-PTX         18 / 41
+  precedence-aware    0 / 41
 
 Reproduce with:
 
@@ -149,7 +161,22 @@ executes while every size, offset, magic and architecture field stays correct.
 Row 26 shows why the single-entry test had looked inert: with nothing to tie
 against, the tie-break never runs.
 
-**Row 29, the host decides too.** The same bytes as row 15, on a host with
+**Rows 29 to 40, the size fields.** These ask a different question from every
+row above: not which entry is selected, but which bytes are that entry. Two
+containers declaring byte-identical payloads run different kernels, a PTX entry
+declaring no payload at all runs a full kernel, a second cubin sits unread
+inside a widened declared payload, an entry appended past the declared
+container executes, and a `fat_size` with bit 31 set leaves the driver walking
+nothing.
+
+The three conventional columns are uninformative on these rows, and the reason
+is worth stating rather than hiding: they are fed this parser's entry list, so
+they inherit its corrected bounds and extents and can only disagree about
+selection. A real tool reading the file with its own bounds gets these wrong in
+a way this table cannot express. The comparison that does express it, against
+`cuobjdump` and against a declared-size hash, is in `size-fields.md`.
+
+**Row 41, the host decides too.** The same bytes as row 15, on a host with
 `CUDA_FORCE_PTX_JIT=1`. The PTX entry runs instead of the ELF. No reading of
 the file alone can be right for both hosts, so a precedence-aware parser has to
 take the host policy as an input, which `would_execute()` does.
@@ -207,8 +234,11 @@ sm_75, and on this GPU that flips: the sm_75 cubin is the wrong generation, so
 the PTX is the only candidate and the driver JITs it, while first-match and
 exact-arch both report the cubin.
 
-Every one of the 343 containers parsed with no structural complaint, so the
-parser is exercised on real shipped code and not only on its own corpus.
+342 of the 343 containers parsed with no structural complaint, so the parser is
+exercised on real shipped code and not only on its own corpus. The exception is
+one PTX entry in `libcufile` stored with a second compression indicator, a set
+`compressed_size` with flag 0x8000 clear, which this parser does not decode; it
+says so rather than hashing the stored bytes as though they were code.
 
 ## A separate question: does anything validate payloads
 

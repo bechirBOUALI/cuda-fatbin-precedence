@@ -67,9 +67,26 @@ PATCHED := $(BUILD)/b24_on_first.fatbin \
 SIXENTRY := $(BUILD)/six_entry.fatbin \
             $(BUILD)/six_entry_b24clear.fatbin
 
+# The size fields decide what the driver reads, and they are not what a reader
+# would assume: payload_size advances the walk without bounding the read, and
+# fat_size is truncated to a signed 32-bit value and only has to contain an
+# entry's START. These containers put both facts on the GPU.
+SIZES := $(BUILD)/ptx_collide_a.fatbin \
+         $(BUILD)/ptx_collide_b.fatbin \
+         $(BUILD)/ptx_declared0.fatbin \
+         $(BUILD)/hidden_cubin.fatbin \
+         $(BUILD)/swallow_entry.fatbin \
+         $(BUILD)/swallow_bit24.fatbin \
+         $(BUILD)/oob_live_entry.fatbin \
+         $(BUILD)/oob_hidden_entry.fatbin \
+         $(BUILD)/oob_shrink.fatbin \
+         $(BUILD)/oob_offby1.fatbin \
+         $(BUILD)/trunc_negative.fatbin \
+         $(BUILD)/trunc_high.fatbin
+
 .PHONY: all clean list
 all: $(CUBINS) $(CUBINS86) $(CUBINS80) $(CUBINS75) $(PTX75) $(PTXS) \
-     $(FATBINS) $(PATCHED) $(SIXENTRY)
+     $(FATBINS) $(PATCHED) $(SIXENTRY) $(SIZES)
 
 $(BUILD):
 	mkdir -p $@
@@ -281,6 +298,73 @@ $(BUILD)/six_entry.fatbin: $(BUILD)/six_entry_raw.fatbin
 $(BUILD)/six_entry_b24clear.fatbin: $(BUILD)/six_entry_raw.fatbin
 	cp $< $@
 
+SIZEPATCH := ../../scripts/patch_size.py
+
+# Uncompressed PTX containers. The default build compresses PTX, and the NUL
+# rule below is a property of the stored text, so these are built with
+# compression off to state the case in its simplest form.
+$(BUILD)/ptx_%_raw.fatbin: $(BUILD)/variant_%.ptx
+	$(FATBINARY) --create=$@ --compress=false \
+	  --image3=kind=ptx,sm=$(SM),file=$<
+
+# Two containers whose DECLARED payload bytes are byte-identical and which run
+# different kernels. The driver reads PTX to the first NUL and ignores
+# payload_size, so declaring 200 of 344 bytes leaves the marker constant
+# outside the declared range. A tool hashing payload[0:payload_size] gives both
+# files the same hash.
+$(BUILD)/ptx_collide_a.fatbin: $(BUILD)/ptx_a_raw.fatbin
+	python3 $(SIZEPATCH) $< $@ --payload-size 200
+
+$(BUILD)/ptx_collide_b.fatbin: $(BUILD)/ptx_b_raw.fatbin
+	python3 $(SIZEPATCH) $< $@ --payload-size 200
+
+# The limit case: a PTX entry declaring no payload at all still compiles and
+# runs a full kernel.
+$(BUILD)/ptx_declared0.fatbin: $(BUILD)/ptx_a_raw.fatbin
+	python3 $(SIZEPATCH) $< $@ --payload-size 0
+
+# The other direction. A whole second cubin inside the declared payload, past
+# the end of the embedded ELF, which the driver never reads and cuobjdump never
+# extracts. A declared-size hasher covers bytes that no GPU executes.
+$(BUILD)/hidden_cubin.fatbin: $(BUILD)/single_elf_a.fatbin $(BUILD)/variant_b.cubin
+	python3 $(SIZEPATCH) $< $@ --append-raw $(BUILD)/variant_b.cubin \
+	  --payload-size +3112 --fat-size +3112
+
+# Entry 0's declared payload widened to swallow entry 1. Every payload byte is
+# untouched and two bytes of metadata change, yet one entry disappears from
+# every reader and, in the bit-24 case, the executed kernel flips.
+$(BUILD)/swallow_entry.fatbin: $(BUILD)/elf_ab.fatbin
+	python3 $(SIZEPATCH) $< $@ --payload-size +3176
+
+$(BUILD)/swallow_bit24.fatbin: $(BUILD)/b24_on_first.fatbin
+	python3 $(SIZEPATCH) $< $@ --payload-size +3176
+
+# An entry appended past the declared container. The driver walks an entry when
+# its START is inside fat_size, so one extra byte of declared size makes an
+# entry live whose header and payload lie entirely outside the container.
+$(BUILD)/oob_live_entry.fatbin: $(BUILD)/flag24_elfa.fatbin $(BUILD)/elf_ba.fatbin
+	python3 $(SIZEPATCH) $< $@ --append-entry $(BUILD)/elf_ba.fatbin \
+	  --fat-size +1
+
+$(BUILD)/oob_hidden_entry.fatbin: $(BUILD)/flag24_elfa.fatbin $(BUILD)/elf_ba.fatbin
+	python3 $(SIZEPATCH) $< $@ --append-entry $(BUILD)/elf_ba.fatbin
+
+# The boundary itself, one byte apart, on a container whose entry 1 wins.
+$(BUILD)/oob_shrink.fatbin: $(BUILD)/b24_on_first.fatbin
+	python3 $(SIZEPATCH) $< $@ --fat-size 3176
+
+$(BUILD)/oob_offby1.fatbin: $(BUILD)/b24_on_first.fatbin
+	python3 $(SIZEPATCH) $< $@ --fat-size 3177
+
+# fat_size is truncated to a signed 32-bit value before it bounds the walk.
+# Setting bit 31 makes the driver walk nothing; setting bit 32 makes it walk
+# the low half while a u64 reader sees a container of 4 GB and more.
+$(BUILD)/trunc_negative.fatbin: $(BUILD)/b24_on_first.fatbin
+	python3 $(SIZEPATCH) $< $@ --fat-size 0x800018D0
+
+$(BUILD)/trunc_high.fatbin: $(BUILD)/b24_on_first.fatbin
+	python3 $(SIZEPATCH) $< $@ --fat-size 0x100000C68
+
 # What a static scanner reports for each artifact. Compare against what the
 # harness observes at runtime; any disagreement is the finding.
 list: $(FATBINS)
@@ -290,5 +374,6 @@ list: $(FATBINS)
 
 clean:
 	rm -f $(CUBINS) $(CUBINS86) $(CUBINS80) $(CUBINS75) $(PTX75) $(PTXS) \
-	      $(FATBINS) $(PATCHED) $(SIXENTRY) $(BUILD)/six_entry_raw.fatbin \
-	      $(BUILD)/tampered_payload.fatbin
+	      $(FATBINS) $(PATCHED) $(SIXENTRY) $(SIZES) \
+	      $(BUILD)/six_entry_raw.fatbin $(BUILD)/ptx_a_raw.fatbin \
+	      $(BUILD)/ptx_b_raw.fatbin $(BUILD)/tampered_payload.fatbin

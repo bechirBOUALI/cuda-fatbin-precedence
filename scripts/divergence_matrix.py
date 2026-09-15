@@ -71,6 +71,21 @@ CASES = [
     ("flag24_elfa.fatbin",    "one sm_89 ELF, flags bit 24 set",             {}),
     ("b24_on_first.fatbin",   "ELF A + ELF B, bit 24 on A only",             {}),
     ("b24_on_second.fatbin",  "ELF A + ELF B, bit 24 on B only",             {}),
+    # The size fields. payload_size advances the walk without bounding the read,
+    # and fat_size is truncated to int32 and need only contain an entry's start.
+    ("ptx_collide_a.fatbin",  "PTX, 200 of 344 bytes declared",              {}),
+    ("ptx_collide_b.fatbin",  "same 200 declared bytes, other kernel",       {}),
+    ("ptx_declared0.fatbin",  "PTX, 0 bytes declared",                       {}),
+    ("hidden_cubin.fatbin",   "second cubin inside the declared payload",    {}),
+    ("swallow_entry.fatbin",  "entry 0 declares away entry 1",               {}),
+    ("swallow_bit24.fatbin",  "same, over the bit 24 tie-break",             {}),
+    ("oob_hidden_entry.fatbin", "entry appended past the declared container",{}),
+    ("oob_live_entry.fatbin", "same, one byte more declared",                {}),
+    ("oob_shrink.fatbin",     "fat_size 3176, entry 1 outside",              {}),
+    ("oob_offby1.fatbin",     "fat_size 3177, entry 1 starts inside",        {}),
+    ("trunc_negative.fatbin", "fat_size 0x800018D0, negative as int32",      {}),
+    ("trunc_high.fatbin",     "fat_size 0x100000C68, low 32 bits used",      {}),
+
     ("ptxa_elfb.fatbin",      "PTX A + ELF B, CUDA_FORCE_PTX_JIT=1",
      {"CUDA_FORCE_PTX_JIT": "1"}),
 ]
@@ -141,7 +156,13 @@ def run_driver(path, env_extra):
     earlier run can be served back and recorded as a fresh selection decision.
     """
     env = dict(os.environ, CUDA_CACHE_DISABLE="1", **env_extra)
-    proc = subprocess.run([LOADER, path], capture_output=True, text=True, env=env)
+    try:
+        proc = subprocess.run([LOADER, path], capture_output=True, text=True,
+                              env=env, timeout=60)
+    except subprocess.TimeoutExpired:
+        # A container can make the driver's walk never terminate. Record it
+        # rather than hanging the matrix on it.
+        return "driver did not return"
     if proc.returncode != 0:
         if "CUDA_ERROR_NO_BINARY_FOR_GPU" in proc.stderr:
             return NOTHING
