@@ -3,14 +3,15 @@
 A CUDA fat binary holds several compiled forms of the same GPU code. The driver
 picks exactly one and runs it, by a rule NVIDIA does not publish.
 
-Watching what ran is a solved problem. CUPTI reports the selected payload back
-to a profiler on live hardware, and eBPF probes on the CUDA API see every
-container as it loads. The open question is the one before execution: **given
-the file, which entry will run**. That is what a scanner reading a wheel in a
-registry has to answer, what an attestation mapping observed code back to a
-shipped entry has to answer, and what anyone reasoning about a GPU they do not
-have in front of them has to answer. None of it can be settled by running the
-code.
+Watching what ran is a solved problem, and dynamic instrumentation is the right
+tool for it. CUPTI reports the selected payload back to a profiler on live
+hardware, and eBPF probes spanning the CUDA API see containers as they load and
+the calls that follow them. The open question is the one before execution:
+**given the file, which entry will run**. That is what a scanner reading a
+wheel in a registry has to answer, what an attestation mapping observed code
+back to a shipped entry has to answer, and what anyone reasoning about a GPU
+they do not have in front of them has to answer. None of it can be settled by
+running the code.
 
 NVIDIA documents the coarse rule, that a compatible cubin is preferred over
 PTX, and then stops: the runtime is said to find the "best matching" entry,
@@ -134,17 +135,59 @@ scan cannot do. And it returns compiled SASS without provenance: a 640-byte
 PTX-only container yields a 3112-byte ELF that appears nowhere in the input, so
 mapping observed code back to a shipped entry still needs the rule.
 
-**eBPF sees the container, not the choice.** Instrumenting `cuModuleLoadData`
-captures the bytes handed to the driver, which is strictly better than reading
-a file section since it also catches containers built on the heap. But
-selection happens afterwards, inside `libcuda`, so that vantage point holds the
-same ambiguity a static reader holds.
+**eBPF instrumentation is better placed than any file reader.** Stealthium's
+platform, whose write-up of the fatbin format this research started from,
+intercepts several CUDA APIs in real time with eBPF uprobes, `cuModuleLoadData`
+among them, capturing the complete fatbin, the process context, every contained
+PTX and cubin, hashes of the individual kernels, the architecture targets and
+toolkit versions, and the compression and binary metadata. Capturing the
+container already beats reading a file section, since it catches containers
+assembled on the heap. And a hook set that reaches past the load is not
+confined to the container: selection happens inside `libcuda` after the load,
+so what follows it in the API is where the answer becomes visible, which is a
+vantage point no static reader has.
 
-**No tool models the selection from the file.** ZLUDA is the clearest case,
-being the one project that must consume real fat binaries: it discards every
-cubin outright, `if file.header.kind != HEADER_KIND_PTX { return; }`, then
-walks PTX in reverse behind a literal `// TODO: actually sort by SM`. The rule
-is not merely undocumented, it is unimplemented outside NVIDIA.
+What it costs is what CUPTI costs. The code has to execute, on a host you
+control, while it runs, so a file sitting in a registry is out of reach. And
+the published account of the rule itself is still the coarse two-tier one,
+matching SM version else PTX, so predicting the selection before execution, or
+mapping an observed kernel back to the shipped entry it came from, still needs
+the precedence rule below.
+
+**No tool that reads the file models the selection.** Three real ones were run
+against the same containers. None of them is a security control, and that
+should be said before the table rather than after it: Datadog's parser is GPU
+observability, where a mis-parse costs a metric and not a gate; ZLUDA is a
+compatibility layer; `cuobjdump` is an inspection utility that lists entries
+and never claims to choose between them. They are here because they are the
+real, named, open-source instances of the pattern a scanner would be built
+from.
+
+| Container, on an sm_89 GPU | `cuobjdump` | Datadog `pkg/gpu/cuda` | ZLUDA | this parser | the GPU ran |
+|---|---|---|---|---|---|
+| sm_80 and sm_86 cubins, stock `nvcc` output | lists both, marks neither | no kernels found | nothing, discards cubins | entry 1 | entry 1 |
+| compute_89 PTX then sm_89 cubin | lists both | entry 1, **correct** | entry 0, the PTX | entry 1 | entry 1 |
+| two compute_89 PTX entries | lists both | no kernels found | entry 1, **correct** | entry 1 | entry 1 |
+
+Each tool is right once and blind twice, and neither is right for a reason that
+generalises. Datadog drops PTX unconditionally, which happens to agree with the
+driver preferring cubins on row two and fails on row three. ZLUDA keeps only
+PTX and walks it backwards, which happens to match the last-PTX-wins rule on
+row three and fails on row two.
+
+Row one is the one to weigh, because nothing in it is crafted. Two stock
+cubins, the shape cuBLAS actually ships, and the tool reports no kernels at all
+while the GPU runs one. Its filter matches the raw compute capability with no
+compatibility range, so a container with no exact match disappears. ZLUDA's
+source says the rest: it discards every cubin with
+`if file.header.kind != HEADER_KIND_PTX { return; }`, then walks PTX in reverse
+behind a literal `// TODO: actually sort by SM`. The rule is not merely
+undocumented, it is unimplemented outside NVIDIA.
+
+Every cell above was measured, the tools built from pinned upstream commits and
+run locally, with the last column read back from the GPU. No evasion of a
+security product is claimed, because no open-source GPU-code security scanner
+was found to test against.
 
 For contrast, Apple ships `macho_best_slice()` precisely so tools can ask which
 slice of a universal binary will run, and Patrick Wardle showed in 2024 that

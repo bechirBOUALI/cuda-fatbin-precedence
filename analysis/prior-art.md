@@ -65,13 +65,22 @@ there is the rule: their account of selection is the two-tier "matching SM
 version, else PTX", with nothing on compatible-but-not-exact cubins, the
 tie-breaks, or the flag bits.
 
-Their product hooks `cuModuleLoadData` with an eBPF uprobe and hashes every
-entry it finds. That vantage point beats reading a file section, since it also
-catches containers assembled on the heap, but it sits upstream of the decision:
-selection happens afterwards inside `libcuda`, so capturing the container does
-not say which entry of it runs.
+Their product intercepts several CUDA APIs in real time with eBPF uprobes,
+`cuModuleLoadData()` among them, capturing the complete fatbin, the process
+context, every contained PTX and cubin, hashes of the individual kernels, the
+architecture targets and toolkit versions, and the compression and binary
+metadata. That vantage point beats reading a file section, since it also
+catches containers assembled on the heap, and it is not confined to the
+container: selection happens inside `libcuda` after the load, so a hook set
+reaching past `cuModuleLoadData()` into the calls that follow is in a position
+to attribute the code that actually ran. Dynamic instrumentation is simply
+better placed for that question than anything reading the file, and this
+write-up should not be read as saying otherwise. What does not follow from it
+is the rule: it needs the code to execute, on a host you control, while it
+runs, and their published account of selection remains the two-tier "matching
+SM version, else PTX".
 
-**Runtime observation is a solved problem, by an official mechanism.** CUPTI's
+**Runtime observation is a solved problem, officially and otherwise.** CUPTI's
 `CUPTI_CBID_RESOURCE_MODULE_LOADED` hands a profiler the payload the driver
 selected rather than the container. Measured here: a 6368-byte container
 holding two sm_89 cubins yields 3112 bytes, a bare ELF, carrying only the
@@ -110,8 +119,9 @@ contribution below it.
 Two further claims had to be narrowed. The threat model is not this work's, it
 is Stealthium's and was published first, so what is claimed here is the rule
 rather than the idea. And "nothing can tell which entry runs" is false, since
-CUPTI reports exactly that at runtime, so the claim is narrowed to determining
-it from the file without executing it.
+CUPTI reports exactly that at runtime and eBPF instrumentation across the CUDA
+API is positioned to attribute it as well, so the claim is narrowed to
+determining it from the file without executing it.
 
 Searches run 2026-09-14 covering: driver selection and precedence among fat
 binary entries; duplicate same-architecture entries and tie-breaking; the entry
