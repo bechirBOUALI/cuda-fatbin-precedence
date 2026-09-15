@@ -1,11 +1,11 @@
-# Device-side artifacts for the fatbin entry-precedence experiment (Step 1).
+# Device-side artifacts for the fatbin entry-precedence experiment.
 #
 # Produces, for each variant, a standalone .cubin and .ptx, then combines them
 # into fatbins that deliberately contain MORE THAN ONE entry matching sm_89.
 # The harness loads each fatbin and reports which marker came back, which tells
 # us which entry the driver selected.
 
-CUDA_HOME := /usr/local/cuda-13.2
+CUDA_HOME ?= /usr/local/cuda-13.2
 NVCC      := $(CUDA_HOME)/bin/nvcc
 FATBINARY := $(CUDA_HOME)/bin/fatbinary
 SM        := 89
@@ -49,8 +49,27 @@ FATBINS := $(BUILD)/elf_ab.fatbin \
            $(BUILD)/flag21_elfa.fatbin \
            $(BUILD)/flag24_elfa.fatbin
 
+# The rest of the corpus, built by patching a container above rather than by
+# fatbinary. These are needed by scripts/divergence_matrix.py exactly like the
+# ones in FATBINS, so they belong in the default build.
+PATCHED := $(BUILD)/b24_on_first.fatbin \
+           $(BUILD)/b24_on_second.fatbin \
+           $(BUILD)/arch_hdr89_elf86.fatbin \
+           $(BUILD)/arch_hdr86_elf89.fatbin \
+           $(BUILD)/arch_hdr89_elf75.fatbin \
+           $(BUILD)/arch_hdr75_elf89.fatbin \
+           $(BUILD)/badelf_then_good.fatbin
+
+# The six-entry container behind docs/entry-selection.gif, and the same
+# container with bit 24 cleared on entry 3. Not part of the divergence matrix,
+# which pairs two entries at a time; this one exercises all five levels in a
+# single file.
+SIXENTRY := $(BUILD)/six_entry.fatbin \
+            $(BUILD)/six_entry_b24clear.fatbin
+
 .PHONY: all clean list
-all: $(CUBINS) $(CUBINS86) $(CUBINS80) $(CUBINS75) $(PTX75) $(PTXS) $(FATBINS)
+all: $(CUBINS) $(CUBINS86) $(CUBINS80) $(CUBINS75) $(PTX75) $(PTXS) \
+     $(FATBINS) $(PATCHED) $(SIXENTRY)
 
 $(BUILD):
 	mkdir -p $@
@@ -242,6 +261,26 @@ $(BUILD)/arch_hdr75_elf89.fatbin: $(BUILD)/single_elf_a.fatbin
 $(BUILD)/badelf_then_good.fatbin: $(BUILD)/elf_ab.fatbin
 	python3 $(ARCHPATCH) $< $@ --entry 0 --elf-arch 75
 
+# The six-entry container the walkthrough animates, in file order: a compute_89
+# PTX entry, an sm_75 cubin of the wrong generation, an sm_86 cubin, then three
+# sm_89 cubins. Entry 3 carries variant_a and bit 24, entries 4 and 5 carry
+# variant_b and variant_a. Every level of the hierarchy decides exactly one
+# elimination, and the bit-24-cleared twin hands the win to entry 3 instead.
+$(BUILD)/six_entry_raw.fatbin: $(CUBINS) $(PTXS) $(CUBINS75) $(CUBINS86)
+	$(FATBINARY) --create=$@ \
+	  --image3=kind=ptx,sm=$(SM),file=$(BUILD)/variant_a.ptx \
+	  --image3=kind=elf,sm=75,file=$(BUILD)/variant_a_sm75.cubin \
+	  --image3=kind=elf,sm=86,file=$(BUILD)/variant_a_sm86.cubin \
+	  --image3=kind=elf,sm=$(SM),file=$(BUILD)/variant_a.cubin \
+	  --image3=kind=elf,sm=$(SM),file=$(BUILD)/variant_b.cubin \
+	  --image3=kind=elf,sm=$(SM),file=$(BUILD)/variant_a.cubin
+
+$(BUILD)/six_entry.fatbin: $(BUILD)/six_entry_raw.fatbin
+	python3 $(PATCH) $< $@ --entry 3 --set-bit 24
+
+$(BUILD)/six_entry_b24clear.fatbin: $(BUILD)/six_entry_raw.fatbin
+	cp $< $@
+
 # What a static scanner reports for each artifact. Compare against what the
 # harness observes at runtime; any disagreement is the finding.
 list: $(FATBINS)
@@ -250,4 +289,6 @@ list: $(FATBINS)
 	done
 
 clean:
-	rm -f $(CUBINS) $(CUBINS86) $(CUBINS80) $(CUBINS75) $(PTX75) $(PTXS) $(FATBINS)
+	rm -f $(CUBINS) $(CUBINS86) $(CUBINS80) $(CUBINS75) $(PTX75) $(PTXS) \
+	      $(FATBINS) $(PATCHED) $(SIXENTRY) $(BUILD)/six_entry_raw.fatbin \
+	      $(BUILD)/tampered_payload.fatbin

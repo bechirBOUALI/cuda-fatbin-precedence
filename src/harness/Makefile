@@ -1,4 +1,4 @@
-CUDA_HOME := /usr/local/cuda-13.2
+CUDA_HOME ?= /usr/local/cuda-13.2
 BUILD     := ../../build
 
 .PHONY: all clean

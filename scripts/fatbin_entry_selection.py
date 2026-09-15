@@ -14,7 +14,7 @@ then confirmed against the driver's own code; see
 `analysis/entry-precedence.md` and `analysis/driver-selection-logic.md`.
 
 Usage:
-    fatbin_parser.py <file> [--sm 89] [--policy default|force-ptx-jit] [--json]
+    fatbin_entry_selection.py <file> [--sm 89] [--policy default|force-ptx-jit] [--json]
 
 `<file>` may be a raw .fatbin, or any ELF (object, shared library, executable)
 carrying a .nvFatBinSegment section, in which case every container found is
@@ -528,7 +528,8 @@ def arch_compatible(entry, sm, suffix=""):
 def would_execute(entries, sm, policy="default", suffix=""):
     """Return the entry the driver would select, or None.
 
-    Three levels, each consulted only when the one above it ties:
+    Four ranking levels below the compatibility filter, each consulted only
+    when the one above it ties:
 
       1. kind          ELF beats 0x10 beats PTX. Hard-coded, so no position or
                        architecture advantage overturns it: an sm_86 cubin wins

@@ -35,8 +35,8 @@ Every finding below lies beneath that line.
 | 11 | Entry kinds 0x20, 0x80 and 0x100 are `index`, `tile ir` and `contatenated entry`, NVIDIA's own spelling | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 | 12 | Kind 0x10 is an ELF the driver finalizes before load. **Inference**, not confirmed: NVIDIA names it nowhere | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 
-Below illustration of Row 1 to 3 as the
-driver applies them, one container narrowed to one kernel:
+The illustration below shows rows 1 to 3 as the driver applies them, one
+container narrowed to one kernel:
 
 ![One fat binary, six entries, five eliminated by header fields, one running on the GPU](docs/entry-selection.gif)
 
@@ -45,9 +45,11 @@ anything. Each gate crosses out the entry it rejects and marks the field that
 did it: the wrong cubin generation, the kind that outranks it, the further
 architecture, the flag bit, the file position. Entry 4 survives and runs.
 
-That container is real. Building it and clearing bit 24 on entry 3 changes the
-marker the GPU returns from `0xBBBB` to `0xAAAA`, because entry 3 then wins on
-file order instead. Nothing else in the file changes.
+That container is real, and it is in the corpus as `six_entry.fatbin`.
+Clearing bit 24 on entry 3 changes the marker the GPU returns from `0xBBBB` to
+`0xAAAA`, because entry 3 then wins on file order instead. Nothing else in the
+file changes, and both containers are built by `make -C src/kernels` and
+measured the same way as every other row.
 
 Open [docs/entry-selection.html](docs/entry-selection.html) for the same
 walkthrough with a pause control, or
@@ -58,7 +60,7 @@ The selection path is given as disassembly in
 [driver-selection-logic](analysis/driver-selection-logic.md) and as decompiled
 C in [decompiled-selection](analysis/decompiled-selection.md). What was already
 public before this work is set out in [prior-art](analysis/prior-art.md).
-[WRITEUP.md](WRITEUP.md) is the whole argument read end to end.
+[SELECTION-RULE.md](SELECTION-RULE.md) is the whole argument read end to end.
 
 ## This is not only a laptop result
 
@@ -100,9 +102,10 @@ Knowing the rule is what closes the gap. A tool that reproduces the driver's
 precedence can point at the entry that will actually execute, hash that one,
 disassemble that one, and say plainly when a container has no runnable entry at
 all. That is what `would_execute()` does, and
-[divergence-matrix](analysis/divergence-matrix.md) is how it was checked: 29
-containers built to put the rules in conflict, each loaded on a real GPU, with
-the rule agreeing with hardware on every one.
+[divergence-matrix](analysis/divergence-matrix.md) is how it was checked: 28
+containers built to put the rules in conflict, measured as 29 cases because one
+is loaded under two host policies, each one run on a real GPU, with the rule
+agreeing with hardware on every one.
 
 ## Where this shows up
 
@@ -152,7 +155,7 @@ control, while it runs, so a file sitting in a registry is out of reach. And
 the published account of the rule itself is still the coarse two-tier one,
 matching SM version else PTX, so predicting the selection before execution, or
 mapping an observed kernel back to the shipped entry it came from, still needs
-the precedence rule below.
+the precedence rule set out above.
 
 **No tool that reads the file models the selection.** Three real ones were run
 against the same containers. None of them is a security control, and that
@@ -163,17 +166,17 @@ and never claims to choose between them. They are here because they are the
 real, named, open-source instances of the pattern a scanner would be built
 from.
 
-| Container, on an sm_89 GPU | `cuobjdump` | Datadog `pkg/gpu/cuda` | ZLUDA | this parser | the GPU ran |
+| Container, on an sm_89 GPU | `cuobjdump` | Datadog `pkg/gpu/cuda` | ZLUDA | fatbin_entry_selection.py | the GPU ran |
 |---|---|---|---|---|---|
 | sm_80 and sm_86 cubins, stock `nvcc` output | lists both, marks neither | no kernels found | nothing, discards cubins | entry 1 | entry 1 |
 | compute_89 PTX then sm_89 cubin | lists both | entry 1, **correct** | entry 0, the PTX | entry 1 | entry 1 |
 | two compute_89 PTX entries | lists both | no kernels found | entry 1, **correct** | entry 1 | entry 1 |
 
-Each tool is right once and blind twice, and neither is right for a reason that
-generalises. Datadog drops PTX unconditionally, which happens to agree with the
-driver preferring cubins on row two and fails on row three. ZLUDA keeps only
-PTX and walks it backwards, which happens to match the last-PTX-wins rule on
-row three and fails on row two.
+Each tool is right once and blind twice, and none of them is right for a
+reason that generalises. Datadog drops PTX unconditionally, which happens to
+agree with the driver preferring cubins on row two and fails on row three.
+ZLUDA keeps only PTX and walks it backwards, which happens to match the
+last-PTX-wins rule on row three and fails on row two.
 
 Row one is the one to weigh, because nothing in it is crafted. Two stock
 cubins, the shape cuBLAS actually ships, and the tool reports no kernels at all
@@ -196,8 +199,8 @@ equivalent call.
 
 ## What the parser adds
 
-`scripts/fatbin_parser.py` answers the question the format does not: for each
-entry, whether the driver would execute it.
+`scripts/fatbin_entry_selection.py` answers the question the format does not:
+for each entry, whether the driver would execute it.
 
 - **It can answer "nothing runs."** A first-match scanner structurally cannot
   produce that verdict, yet it is the correct answer for three container shapes
@@ -223,11 +226,11 @@ Needs a CUDA toolkit, a supported GPU, and Python with `pyelftools` and
 `zstandard`.
 
 ```sh
-make -C src/kernels                  # cubins, PTX, and 29 conflict containers
+make -C src/kernels                  # cubins, PTX, and the corpus containers
 make -C src/harness                  # the loader
 python3 scripts/divergence_matrix.py # the matrix, measured against the GPU
 python3 scripts/survey_libs.py       # the same question on shipped libraries
-python3 scripts/fatbin_parser.py build/ptxa_elfb.fatbin
+python3 scripts/fatbin_entry_selection.py build/ptxa_elfb.fatbin
 ```
 
 Set `CUDA_CACHE_DISABLE=1` for any manual run, or a cached JIT result can be
@@ -236,12 +239,12 @@ mistaken for a fresh selection decision. The matrix script sets it itself.
 ## Layout
 
 ```
-WRITEUP.md   the argument end to end
-docs/        the selection walkthrough as a GIF and as two live pages
-analysis/    the evidence behind each finding above
-scripts/     the parser, the divergence matrix, the shipped-library survey
-src/         test kernels and a minimal Driver API loader
-probes/      programs that identify entry kinds via libnvfatbin
+SELECTION-RULE.md   the argument end to end
+docs/               the selection walkthrough as a GIF and as two live pages
+analysis/           the evidence behind each finding above
+scripts/            the selector, the divergence matrix, the library survey
+src/                test kernels and a minimal Driver API loader
+probes/             programs that identify entry kinds via libnvfatbin
 ```
 
 ## Scope

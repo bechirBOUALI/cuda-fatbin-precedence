@@ -25,6 +25,16 @@ and the driver's rule disagree, the tool is describing code the hardware never
 runs, and it will not warn you, because from its point of view nothing is
 wrong.
 
+Watching what ran is a different question, and it is already answered. CUPTI
+hands a profiler the payload the driver selected rather than the container, and
+eBPF instrumentation spanning the CUDA API sees containers as they load and the
+calls that follow them, which puts dynamic instrumentation in a better position
+to attribute executed code than anything reading a file. What neither gives is
+the answer before execution, on a file in a registry, or the mapping from an
+observed kernel back to the shipped entry it came from. That is the question
+here, and `analysis/prior-art.md` sets out what each existing mechanism does
+and does not cover.
+
 This is a measurement of that rule, a confirmation of it against the driver's
 own code, and a parser that implements it.
 
@@ -56,13 +66,13 @@ from what the GPU runs, on shipped libraries as well as on built cases.
 
 ## The rule
 
-Selection is a three-level hierarchy. Each level is consulted only when the one
-above it ties.
+Selection is a hierarchy of five levels. Each one is consulted only when the
+level above it ties.
 
 | Level | Rule |
 |---|---|
 | 0. compatibility | entries the GPU cannot run leave the candidate set entirely |
-| 1. kind | ELF beats PTX, unconditionally |
+| 1. kind | ELF beats kind 0x10 beats PTX, unconditionally |
 | 2. architecture | among entries of one kind, the nearest compatible one wins, independent of file order |
 | 3. flag bit 24 | among ELF entries still tied, the one **without** bit 24 wins |
 | 4. file order | ELF: the first wins. PTX: the **last** wins |
@@ -86,8 +96,9 @@ reasonable-looking implementation.
 **A PTX entry is unreachable whenever a compatible cubin is present**, which
 follows from the documented rule but is sharper than it sounds. Kind is decided
 before architecture, so no amount of architectural precision saves the PTX: an
-sm_86 cubin beats an exactly matching compute_89 PTX on an sm_89 GPU. Nothing in the PTX says it is dead, and `cuobjdump` lists it alongside the
-cubin without comment. PTX is the tempting thing to analyse, because it is text
+sm_86 cubin beats an exactly matching compute_89 PTX on an sm_89 GPU. Nothing
+in the PTX says it is dead, and `cuobjdump` lists it alongside the cubin
+without comment. PTX is the tempting thing to analyse, because it is text
 and the alternative needs a disassembler, and it is the thing least likely to
 run.
 
@@ -203,8 +214,9 @@ when a cubin wins.
 The C above is Ghidra output with identifiers renamed and comments added,
 nothing else altered. Ghidra scales pointer arithmetic by its own guessed
 element type, so `entry + 0x14` is byte offset 0x28 and `entry + 0xe` is byte
-offset 0x1c; the constants are reliable and the types are not. Addresses are
-build-specific. The full decompilation is in
+offset 0x1c; the constants are reliable and the types are not. Its own labels,
+`DAT_0136f4d8` above, carry a 0x100000 image base that the virtual addresses
+quoted elsewhere here do not. Addresses are build-specific. The full decompilation is in
 `analysis/decompiled-selection.md` and the disassembly walkthrough in
 `analysis/driver-selection-logic.md`.
 
@@ -212,8 +224,9 @@ build-specific. The full decompilation is in
 
 The three readings below are not measurements of any shipping product. They are
 the plausible ways a tool could choose an entry, written so the driver's rule
-has something to be compared against. Twenty-nine containers, each one loaded on
-the GPU so that what executed is measured rather than predicted.
+has something to be compared against. Twenty-eight containers, each one loaded
+on the GPU so that what executed is measured rather than predicted, and
+twenty-nine cases, because one container is loaded under two host policies.
 
 | How a tool picks the entry to inspect | Names an entry that did not run |
 |---|---|
@@ -355,17 +368,17 @@ a function of the file and the host together.
 
 ## The fix
 
-`scripts/fatbin_parser.py` reports, per entry, what it is and whether the
-driver would execute it. `would_execute(entries, sm, policy)` implements the
-the hierarchy above, matches on the rendered architecture name so an `sm_89a` entry is
-not a candidate for an sm_89 GPU, takes the target as an argument rather than
-assuming the local GPU, and takes the host policy as an argument so the
-`CUDA_FORCE_PTX_JIT` case is a parameter and not a second code path. It reads a raw container, a shared
-library or executable through the registration wrappers, and a relocatable
-object by walking `.nv_fatbin` directly, since in an object file the wrapper's
-pointer is not filled in until link time. It agrees with the driver on all twenty-nine
-measured containers, including the two where the right answer is that nothing
-runs.
+`scripts/fatbin_entry_selection.py` reports, per entry, what it is and whether
+the driver would execute it. `would_execute(entries, sm, policy)` implements the
+hierarchy above, matches on the rendered architecture name so an `sm_89a` entry
+is not a candidate for an sm_89 GPU, takes the target as an argument rather
+than assuming the local GPU, and takes the host policy as an argument so the
+`CUDA_FORCE_PTX_JIT` case is a parameter and not a second code path. It reads a
+raw container, a shared library or executable through the registration
+wrappers, and a relocatable object by walking `.nv_fatbin` directly, since in
+an object file the wrapper's pointer is not filled in until link time. It
+agrees with the driver on all twenty-nine measured cases, including the two
+where the right answer is that nothing runs.
 
 Three implementation details matter more than they look.
 
@@ -414,11 +427,11 @@ positioned past the declared container size.
 ## Reproducing
 
 ```sh
-make -C src/kernels                  # cubins, PTX, and 20 conflict containers
+make -C src/kernels                  # cubins, PTX, and the corpus containers
 make -C src/harness                  # the loader
 python3 scripts/divergence_matrix.py # the matrix, measured against the GPU
 python3 scripts/survey_libs.py       # the same question on shipped libraries
-python3 scripts/fatbin_parser.py build/ptxa_elfb.fatbin
+python3 scripts/fatbin_entry_selection.py build/ptxa_elfb.fatbin
 ```
 
 Set `CUDA_CACHE_DISABLE=1` for any manual run. Without it a cached JIT result

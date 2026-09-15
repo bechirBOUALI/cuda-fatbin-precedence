@@ -25,7 +25,7 @@ each shortcut breaks, not how any particular scanner behaves.
 | first-match | first entry whose architecture does not exceed the GPU | the obvious loop, and what a linear scan gives you |
 | exact-arch | first entry whose architecture equals the GPU exactly, else first-match | the careful version, and correct on most shipped libraries |
 | prefer-PTX | the first PTX entry, else first-match | PTX is text, so it needs no disassembler |
-| precedence-aware | the driver's own rule | `would_execute()` in `scripts/fatbin_parser.py` |
+| precedence-aware | the driver's own rule | `would_execute()` in `scripts/fatbin_entry_selection.py` |
 
 ## The matrix
 
@@ -61,7 +61,7 @@ each shortcut breaks, not how any particular scanner behaves.
 | ELF A + ELF B, bit 24 on B only | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 | PTX A + ELF B, CUDA_FORCE_PTX_JIT=1 | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 
-29 containers, each one measured on the GPU.
+29 cases over 28 containers, each one measured on the GPU.
 rows where the reading disagrees with what executed:
   first-match        15 / 29
   exact-arch         15 / 29
@@ -88,8 +88,8 @@ No single positional convention is correct for both kinds.
 **Rows 6 to 11, architecture outranks order.** An sm_89 against an sm_86 cubin,
 then sm_80 against sm_86 where neither matches exactly, then three entries at
 sm_75, sm_80 and sm_86. The nearest compatible entry wins from either end.
-Rows 10 and 11 answer an open question from Step 1: the rule holds at three
-entries, so it was not an artefact of testing pairs.
+Rows 10 and 11 answer the question the paired cases leave open: the rule holds
+at three entries too, so it is not an artefact of testing pairs.
 
 **Rows 12 to 14, compatibility is a filter and not a preference.** A lone sm_75
 cubin is refused with `CUDA_ERROR_NO_BINARY_FOR_GPU`, because cubins are
@@ -99,7 +99,7 @@ orders even though kind preference ranks ELF above PTX. Incompatible entries
 leave the candidate set before ranking begins, so the hierarchy operates only
 on entries that could actually run.
 
-That also makes rows 11 and 13 sharper than they look. sm_75 is the entry a
+That also makes rows 10 and 13 sharper than they look. sm_75 is the entry a
 first-match reading selects there, and in most of the shipped libraries below.
 A conventional reading is not picking a suboptimal entry in those cases, it is
 naming one the GPU refuses.

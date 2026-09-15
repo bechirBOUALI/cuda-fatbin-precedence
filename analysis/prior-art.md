@@ -113,7 +113,7 @@ disagreement over which entry is live was found.
 Saying the precedence rule is undocumented, without qualification, would
 overstate the case: the cubin-beats-PTX part is documented in several places,
 and a reader who knows the compatibility guides would catch it immediately. So
-`README.md` and `WRITEUP.md` state the documented rule first and locate the
+`README.md` and `SELECTION-RULE.md` state the documented rule first and locate the
 contribution below it.
 
 Two further claims had to be narrowed. The threat model is not this work's, it

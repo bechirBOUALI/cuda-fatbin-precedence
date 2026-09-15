@@ -50,7 +50,8 @@ call sites between the three functions.
         // first entry = container + (u16 header_size @ container+0x06)   VA 0x47b68b
         if ((int)fat_size < 1) {
 LAB_0057be94:
-          state[0xd] = 0;```
+          state[0xd] = 0;
+```
 
 and the loop advances by a stride it takes from each entry:
 
@@ -109,7 +110,8 @@ LAB_00574cec:
         name_buf[0] = '\0';
       }
       arch_or_target_h = parse_target(name_buf);   // parse "sm_<arch><suffix>"; arch_or_target_h now holds a handle, not an arch
-      if (arch_or_target_h != 0) {```
+      if (arch_or_target_h != 0) {
+```
 
 The entry's architecture is not compared as a number. It is formatted into a
 string, `sm_<arch><suffix>`, and that string is then parsed back into a target
@@ -169,7 +171,8 @@ separate canonicalisation step applied only to PTX entries.
       return candidate;
     }
     return incumbent;
-  }```
+  }
+```
 
 Read the returns and the order falls out. An ELF candidate beats any
 non-ELF incumbent. Kind `0x10` beats everything except ELF. PTX beats

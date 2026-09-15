@@ -6,7 +6,7 @@ For every container in the corpus this runs three things and compares them:
   * the driver, by loading the container and reading back the marker the kernel
     wrote, which is ground truth for what executed;
   * two conventional static readings, first-match and prefer-PTX;
-  * `fatbin_parser.would_execute`, which implements the driver's own rule.
+  * `fatbin_entry_selection.would_execute`, which implements the driver's own rule.
 
 A row where a static reading disagrees with the driver is a divergence: the
 scanner is describing code the GPU does not run. The final column is the fix,
@@ -26,7 +26,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fatbin_parser as fp
+import fatbin_entry_selection as fp
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build")
@@ -214,7 +214,8 @@ def main():
                   f"{mark(exact):<14} {mark(ptxish):<14} {mark(aware):<12}")
 
     print()
-    print(f"{len(rows)} containers, each one measured on the GPU.")
+    containers = len({c[0] for c in CASES})
+    print(f"{len(rows)} cases over {containers} containers, each one measured on the GPU.")
     print("rows where the reading disagrees with what executed:")
     for label, count in wrong.items():
         print(f"  {label:<18} {count:>2} / {len(rows)}")

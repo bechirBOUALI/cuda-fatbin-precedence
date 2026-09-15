@@ -17,7 +17,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fatbin_parser as fp
+import fatbin_entry_selection as fp
 
 READINGS = (("first-match", fp.naive_first_match),
             ("exact-arch", fp.naive_exact_arch),
