@@ -174,7 +174,7 @@ is worth stating rather than hiding: they are fed this parser's entry list, so
 they inherit its corrected bounds and extents and can only disagree about
 selection. A real tool reading the file with its own bounds gets these wrong in
 a way this table cannot express. The comparison that does express it, against
-`cuobjdump` and against a declared-size hash, is in `size-fields.md`.
+`cuobjdump` and against a declared-size hash, is in `declared-versus-executed.md`.
 
 **Row 41, the host decides too.** The same bytes as row 15, on a host with
 `CUDA_FORCE_PTX_JIT=1`. The PTX entry runs instead of the ELF. No reading of
@@ -234,14 +234,16 @@ sm_75, and on this GPU that flips: the sm_75 cubin is the wrong generation, so
 the PTX is the only candidate and the driver JITs it, while first-match and
 exact-arch both report the cubin.
 
-342 of the 343 containers parsed with no structural complaint, so the parser is
-exercised on real shipped code and not only on its own corpus. The exception is
-one PTX entry in `libcufile` carrying flags `0x2011`, which is bit 13 rather
-than the zstd bit 15. Stealthium's published `BinInfo` enum names bit 13
-`LZ4Compression`, alongside `ZLIBCompression` at bit 12 and a second LZ4 variant
-at bit 14, so the field carries a compression family and not a single bit. This
-parser decodes only zstd, and says so rather than hashing the stored bytes as
-though they were code.
+Every one of the 343 containers parsed with no structural complaint, so the
+parser is exercised on real shipped code and not only on its own corpus. One of
+them made the point about compression concretely. A PTX entry in `libcufile`
+carries flags `0x2011`, bit 13 rather than the zstd bit 15: Stealthium's
+published `BinInfo` enum names bit 13 `LZ4Compression`, alongside
+`ZLIBCompression` at bit 12 and a second LZ4 variant at bit 14, so the field
+carries a compression family and not a single bit. A parser keying on the zstd
+bit alone hashes 3061 bytes of compressed data where the device code is 10879
+bytes of PTX, which is the same aliasing this document warns about elsewhere.
+This parser decodes LZ4 as well, so the hash covers the code.
 
 ## A separate question: does anything validate payloads
 

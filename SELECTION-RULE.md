@@ -382,7 +382,7 @@ which is the obvious implementation, therefore gives the same hash to different
 code and a different hash to the same code. The collision is in the per-entry
 hash specifically: the two containers differ elsewhere, so a hash over the
 whole container still separates them, and the measurement is in
-`analysis/size-fields.md`.
+`analysis/declared-versus-executed.md`.
 
 `fat_size` bounds the walk, but the driver truncates it to a signed 32-bit
 value and an entry is walked when its **start** lies inside that bound. So an
@@ -395,7 +395,7 @@ entry no NVIDIA tool reports.
 Neither of these needs a malformed file. Every container involved has correct
 magics, correct architectures and untouched payload bytes; only the size fields
 differ. The measurements, and what each reader sees for each case, are in
-`analysis/size-fields.md`.
+`analysis/declared-versus-executed.md`.
 
 ## The fix
 
@@ -458,7 +458,7 @@ finalizer, but NVIDIA names it nowhere and that reading is an inference; and
 several of the selector's policy values are visible in the jump table but
 unidentified. The two size questions that were open here, a payload hidden in
 the slack and an entry past the declared container size, are settled in
-`analysis/size-fields.md`.
+`analysis/declared-versus-executed.md`.
 
 ## Reproducing
 
@@ -477,6 +477,6 @@ decision.
 The evidence behind each finding is in `analysis/`: the measured rules in
 `entry-precedence.md`, the full corpus in `divergence-matrix.md`, the driver
 code as disassembly in `driver-selection-logic.md` and as decompiled C in
-`decompiled-selection.md`, the size fields in `size-fields.md`, the entry kinds
-in `fatbin-entry-kinds.md`, the obfuscation feature in `ptx-obfuscation.md`,
+`decompiled-selection.md`, the size fields in
+`declared-versus-executed.md`, the entry kinds in `fatbin-entry-kinds.md`, the obfuscation feature in `ptx-obfuscation.md`,
 and what was already public in `prior-art.md`.

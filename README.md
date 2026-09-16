@@ -18,6 +18,12 @@ PTX, and then stops: the runtime is said to find the "best matching" entry,
 with no statement of what happens when several entries match equally well.
 Every finding below lies beneath that line.
 
+Every one of them is implemented in `scripts/fatbin_entry_selection.py`, which
+names the entry the driver would run from the file alone, taking the target
+architecture and the host policy as arguments rather than assuming the local
+machine. It agrees with the hardware on all 41 measured cases, so the question
+can be answered without a GPU to answer it on.
+
 ## What the driver actually does
 
 | # | Finding | Evidence |
@@ -34,8 +40,8 @@ Every finding below lies beneath that line.
 | 10 | Decompression is keyed by a flag bit rather than by entry kind, and the decompressed size is not where format notes place it | [driver-selection-logic](analysis/driver-selection-logic.md) |
 | 11 | Entry kinds 0x20, 0x80 and 0x100 are `index`, `tile ir` and `contatenated entry`, NVIDIA's own spelling | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 | 12 | Kind 0x10 is an ELF the driver finalizes before load. **Inference**, not confirmed: NVIDIA names it nowhere | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
-| 13 | `payload_size` advances the walk but does not bound the read: PTX is read to the first NUL, an ELF to the extent its own headers describe. Two containers declaring byte-identical payloads run different kernels | [size-fields](analysis/size-fields.md) |
-| 14 | `fat_size` is truncated to a signed 32-bit value, and an entry is walked when its **start** is inside it, so an entry lying outside the declared container executes | [size-fields](analysis/size-fields.md) |
+| 13 | `payload_size` advances the walk but does not bound the read: PTX is read to the first NUL, an ELF to the extent its own headers describe. Two containers declaring byte-identical payloads run different kernels | [declared-versus-executed](analysis/declared-versus-executed.md) |
+| 14 | `fat_size` is truncated to a signed 32-bit value, and an entry is walked when its **start** is inside it, so an entry lying outside the declared container executes | [declared-versus-executed](analysis/declared-versus-executed.md) |
 
 The illustration below shows rows 1 to 3 as the driver applies them, one
 container narrowed to one kernel:
@@ -58,11 +64,16 @@ walkthrough with a pause control, or
 [docs/entry-explorer.html](docs/entry-explorer.html) to edit the entries and
 flag bits yourself and watch the rule decide.
 
-The selection path is given as disassembly in
-[driver-selection-logic](analysis/driver-selection-logic.md) and as decompiled
-C in [decompiled-selection](analysis/decompiled-selection.md). What was already
+
++ [SELECTION-RULE.md](SELECTION-RULE.md) is the whole argument read end to end.
++ [declared-versus-executed](analysis/declared-versus-executed.md) is the
+sharpest single result: two containers whose declared payload bytes are
+byte-identical, running different kernels on the GPU.
++ What was already
 public before this work is set out in [prior-art](analysis/prior-art.md).
-[SELECTION-RULE.md](SELECTION-RULE.md) is the whole argument read end to end.
++ The selection path is given as disassembly in
+[driver-selection-logic](analysis/driver-selection-logic.md) and as decompiled
+C in [decompiled-selection](analysis/decompiled-selection.md). 
 
 ## This is not only a laptop result
 
@@ -231,11 +242,12 @@ for each entry, whether the driver would execute it.
 - **It reports an obfuscated entry as a distinct outcome**, not as an entry
   with no code, which is how the shipped tooling presents it.
 
-342 of the 343 shipped containers parse with no structural complaint, so it is
-exercised on real code and not only on its own corpus. The exception is one PTX
-entry in `libcufile` compressed with LZ4 rather than zstd, which this parser
-does not decode and reports rather than hashing as though it were code. The
-compression bits are named in Stealthium's published `BinInfo` enum.
+All 343 shipped containers parse with no structural complaint, so it is
+exercised on real code and not only on its own corpus. That includes one PTX
+entry in `libcufile` compressed with LZ4 rather than zstd: the flags field
+carries a compression family, named in Stealthium's published `BinInfo` enum,
+and a parser that keys on the zstd bit alone hashes 3061 bytes of compressed
+data in place of 10879 bytes of PTX.
 
 ## Reproducing
 

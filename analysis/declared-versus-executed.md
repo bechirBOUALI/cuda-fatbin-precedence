@@ -1,4 +1,4 @@
-# The size fields decide what the driver reads, and they are not lengths
+# What a container declares is not what the GPU executes
 
 `entry-precedence.md` answers which entry the driver selects. This document
 answers the question underneath it: once an entry is selected, which bytes are
@@ -150,10 +150,3 @@ all**, so on those the listing is clean and wrong.
   the container boundary, and a non-positive truncated `fat_size` are all
   recorded as notes by `scripts/fatbin_entry_selection.py`, because each one is
   a place where two readers of the same file will disagree.
-
-## Open
-
-The behaviour of containers whose declared sizes make the driver refuse or
-misbehave, rather than merely disagree with a reader, is deliberately not
-documented here. Those cases were measured and are being reported to NVIDIA
-separately; nothing in this repository depends on them.

@@ -85,6 +85,13 @@ KIND_RANK = {KIND_ELF: 3, 0x10: 2, KIND_PTX: 1}
 # excluded by a flag; it declares a different target than its `arch` field
 # alone suggests, and an entry declaring a target the GPU does not report is
 # simply not a candidate.
+# The flags field carries a compression family, not one bit. Stealthium's
+# published BinInfo enum names bits 12 to 15 ZLIBCompression, LZ4Compression,
+# LZ4Compression2 and ZSTDCompression; a default CUDA 13.2 build emits zstd,
+# and one PTX entry in the shipped libcufile is LZ4.
+FLAG_ZLIB           = 1 << 12
+FLAG_LZ4            = 1 << 13
+FLAG_LZ4_2          = 1 << 14
 FLAG_COMPRESSED     = 1 << 15
 # Bit 16 marks a payload obfuscated by fatbinary's keyed -reorder-obfuscation.
 # The entry keeps its kind, its metadata stays readable, and the code does not:
@@ -241,6 +248,13 @@ class Entry:
         self.flags = hdr.flags
         self.kind_name = KIND_NAMES.get(hdr.kind, f"unknown_{hdr.kind:#x}")
         self.compressed = bool(hdr.flags & FLAG_COMPRESSED)
+        self.lz4 = bool(hdr.flags & (FLAG_LZ4 | FLAG_LZ4_2))
+        self.zlib = bool(hdr.flags & FLAG_ZLIB)
+        # compressed_size is set for every scheme, so it, rather than the zstd
+        # bit alone, is what says the stored bytes are not the device code.
+        self.stored_compressed = bool(
+            hdr.flags & (FLAG_COMPRESSED | FLAG_LZ4 | FLAG_LZ4_2 | FLAG_ZLIB)
+            or hdr.compressed_size)
         self.obfuscated = bool(hdr.flags & FLAG_OBFUSCATED)
         # The key is stored as BCD: the decimal digits of the value supplied to
         # fatbinary --okey, read as hex nibbles. 12345 is stored as 0x12345.
@@ -312,30 +326,10 @@ class Entry:
         declared = self.hdr.payload_size
 
         if self.kind in (KIND_PTX, KIND_RELOC_PTX):
-            if self.compressed:
+            if self.stored_compressed:
                 text = self.declared_payload
                 cut = text.find(b"\x00")
                 return text if cut < 0 else text[:cut]
-            if self.hdr.compressed_size:
-                # A second compression scheme. One PTX entry in the shipped
-                # libcufile carries flags 0x2011, which is bit 13 rather than
-                # the zstd bit 15. Stealthium's published BinInfo enum names
-                # bit 13 LZ4Compression, and bits 12 and 14 ZLIBCompression and
-                # LZ4Compression2, so the flags field carries a compression
-                # family rather than one bit. This parser decodes only zstd, so
-                # the stored bytes stand, and the NUL rule below, which applies
-                # to plain text, must not run on them.
-                scheme = {1 << 12: "zlib", 1 << 13: "LZ4",
-                          1 << 14: "LZ4 (second variant)"}
-                named = next((n for b, n in scheme.items() if self.flags & b),
-                             "an unidentified scheme")
-                self.notes.append(
-                    f"payload is compressed by {named}, which this parser does "
-                    f"not decode: compressed_size {self.hdr.compressed_size} is "
-                    f"set while the zstd flag 0x8000 is not. The hash covers "
-                    f"the stored bytes, not the device code. Compression bits "
-                    f"per Stealthium's published BinInfo enum")
-                return self.declared_payload
             cut = blob.find(b"\x00", start, len(blob))
             end = len(blob) if cut < 0 else cut
             if end - start > declared:
@@ -351,7 +345,7 @@ class Entry:
                     f"reads")
             return bytes(blob[start:end])
 
-        if self.kind == KIND_ELF and not self.compressed:
+        if self.kind == KIND_ELF and not self.stored_compressed:
             reach = elf_extent(blob, start, len(blob) - start)
             if reach is not None and reach != declared:
                 if reach > declared:
@@ -468,6 +462,14 @@ class Entry:
             # frame, and reporting a decompression failure here would describe
             # it as corrupt when it is intact and merely unreadable.
             return b""
+        if self.lz4 or (self.hdr.compressed_size and not self.compressed
+                        and not stored.startswith(ZSTD_MAGIC) and not self.zlib):
+            return self.decompress_lz4(stored)
+        if self.zlib and not self.compressed:
+            self.notes.append(
+                "payload is zlib-compressed, flags bit 12, which this parser "
+                "does not decode: no sample was available to test against")
+            return b""
         if not self.compressed and not stored.startswith(ZSTD_MAGIC):
             return stored
         try:
@@ -491,6 +493,37 @@ class Entry:
                 f"decompressed size mismatch: header says "
                 f"{self.hdr.decompressed_size}, got {len(out)}")
         return out
+
+    def decompress_lz4(self, stored):
+        """Decompress an LZ4 entry, the way the driver's consumers do.
+
+        The payload is a raw LZ4 block, not a frame, so the decompressed size
+        has to come from the header rather than from the stream. ZLUDA does the
+        same thing through LZ4_decompress_safe, growing the output buffer when
+        the hint is short, so the hint is treated as a hint here too.
+        """
+        try:
+            import lz4.block
+        except ImportError:
+            self.notes.append(
+                "payload is LZ4-compressed and the lz4 module is missing")
+            return b""
+
+        n = self.hdr.compressed_size or len(stored)
+        hint = max(1024, self.hdr.decompressed_size)
+        for _ in range(8):
+            try:
+                out = lz4.block.decompress(stored[:n], uncompressed_size=hint)
+            except Exception:
+                hint *= 2
+                continue
+            if self.hdr.decompressed_size and len(out) != self.hdr.decompressed_size:
+                self.notes.append(
+                    f"decompressed size mismatch: header says "
+                    f"{self.hdr.decompressed_size}, got {len(out)}")
+            return out
+        self.notes.append("LZ4 decompression failed")
+        return b""
 
     def arch_label(self):
         """The target this entry declares, suffix included.
@@ -577,6 +610,27 @@ def parse_container(blob, offset=0):
             bytes(blob[pos:pos + FIXED_ENTRY_HEADER]))
         if eh.header_size < FIXED_ENTRY_HEADER:
             break
+
+        # An entry whose declared payload does not cover the bytes the driver
+        # actually reads leaves the walk pointing into the middle of that
+        # payload, where the next "entry header" is really code or text. The
+        # driver reads it as a header too, finds a kind it cannot select, and
+        # its stride then carries the walk out of the container. Reporting the
+        # invented fields of such a header as though they were metadata is
+        # worse than useless, so say what is there and stop.
+        room = len(blob) - pos
+        if eh.kind not in KIND_NAMES or eh.header_size > room:
+            preview = bytes(blob[pos:pos + 16])
+            container.notes.append(
+                f"the bytes at offset {pos:#x} do not parse as an entry "
+                f"header: kind {eh.kind:#x} is not a fat binary entry kind, "
+                f"and the walk reached them because entry {len(entries) - 1} "
+                f"declares a payload shorter than the one the driver reads. "
+                f"They are {preview!r}. The driver reads them as a header too, "
+                f"finds nothing it can select, and its stride carries the walk "
+                f"past the end of the container")
+            break
+
         entry = Entry(len(entries), pos, eh, blob)
         entries.append(entry)
         if entry.stride == 0:
@@ -632,6 +686,17 @@ def walk_nv_fatbin(raw, start, size):
         pos += stride
 
 
+class InputError(ValueError):
+    """The file is not something this tool can read, with the reason why.
+
+    Raised instead of failing on a traceback, because the common mistakes,
+    handing it a bare cubin or a host binary with no device code, are ordinary
+    and deserve an answer rather than a stack trace. It subclasses ValueError
+    so that callers sweeping a directory, survey_libs.py among them, keep
+    skipping unreadable files the way they always did.
+    """
+
+
 def find_containers(path):
     """Yield (description, offset, blob) for every fat binary in `path`.
 
@@ -653,8 +718,25 @@ def find_containers(path):
         yield f"{path}", 0, raw
         return
 
+    if not raw:
+        raise InputError(f"{path} is empty")
+
     if raw[:4] != b"\x7fELF":
-        raise ValueError(f"{path}: neither a fat binary nor an ELF")
+        head = raw[:8].hex(" ")
+        raise InputError(
+            f"{path} is neither a fat binary container nor an ELF: it starts "
+            f"{head}, and a container starts with the magic "
+            f"{FATBIN_HEADER_MAGIC:#x}. This tool reads a .fatbin, or an "
+            f"object, executable or shared library with one embedded")
+
+    # A bare cubin is an ELF for the CUDA machine type, EM_CUDA 190. It is one
+    # device image rather than a container of them, so there is no selection to
+    # model and saying so is more use than reporting a missing section.
+    if len(raw) >= 20 and struct.unpack_from("<H", raw, 18)[0] == 190:
+        raise InputError(
+            f"{path} is a bare cubin, a single device image, not a fat binary "
+            f"container. There is no entry to select between. Use cuobjdump on "
+            f"it directly, or pass the .fatbin that carries it")
 
     from elftools.elf.elffile import ELFFile
     with open(path, "rb") as f:
@@ -689,7 +771,9 @@ def find_containers(path):
 
     if fat_off is None:
         if not seen:
-            raise ValueError(f"{path}: no .nv_fatbin section")
+            raise InputError(
+            f"{path} is an ELF with no .nv_fatbin section, so it carries no "
+            f"GPU code this tool can read")
         return
     for foff in walk_nv_fatbin(raw, fat_off, fat_size):
         if foff not in seen:
@@ -871,6 +955,9 @@ def describe(path, sm, policy, suffix=""):
                 "header_size": e.hdr.header_size,
                 "payload_size": e.hdr.payload_size,
                 "compressed": e.compressed,
+                "compression": ("obf" if e.obfuscated else "zstd" if e.compressed
+                                else "lz4" if e.lz4 else "zlib" if e.zlib
+                                else "-"),
                 "compressed_size": e.hdr.compressed_size,
                 "decompressed_size": e.hdr.decompressed_size,
                 "flags": f"{e.flags:#x}",
@@ -903,7 +990,7 @@ def print_report(containers):
         for e in c["entries"]:
             print(f"   {e['index']:>2}  {e['kind_name']:<9} {e['arch_label']:<11} "
                   f"{e['payload_size']:>8} "
-                  f"{'obf' if e['obfuscated'] else 'zstd' if e['compressed'] else '-':<5} "
+                  f"{e['compression']:<5} "
                   f"{e['flags']:<10} {(e['payload_sha256'] or '')[:16]:<16} "
                   f"{'<== EXECUTES' if e['executes'] else ''}")
             if e["identifier"]:
@@ -957,7 +1044,16 @@ def main():
             ap.error(f"cannot parse target {args.target!r}")
         sm, suffix = int(m.group(1)), m.group(2)
 
-    containers = describe(args.file, sm, args.policy, suffix)
+    try:
+        containers = describe(args.file, sm, args.policy, suffix)
+    except InputError as exc:
+        sys.exit(f"{exc}")
+    except FileNotFoundError:
+        sys.exit(f"{args.file}: no such file")
+    except IsADirectoryError:
+        sys.exit(f"{args.file} is a directory, not a file")
+    except PermissionError:
+        sys.exit(f"{args.file}: cannot be read")
     if args.json:
         json.dump(containers, sys.stdout, indent=2)
         sys.stdout.write("\n")
