@@ -79,9 +79,17 @@ produces the digit-preserving pattern, and two inputs settle it:
 | 4660 | `0x4660` |
 
 `0x1234` is 4660, re-emitted as "4660", read back as `0x4660`. So the two forms
-collide, and the effective key space is smaller than it looks: the accepted
-range stops at 99999999, and every stored nibble is a decimal digit, leaving
-well under 32 bits of real entropy.
+collide.
+
+The effective key space is smaller than it looks, for a reason the collision
+only hints at. Every stored nibble is a decimal digit, because the stored value
+is the decimal spelling of the key read as hex, so the reachable stored values
+number at most 10 to the power of the digit count rather than 16. The digit
+count is bounded by what `fatbinary` accepts, measured here rather than
+assumed: `--okey=99999999` builds, `--okey=100000000` and
+`--okey=4294967295` are refused. Eight decimal digits is under 2^27 distinct
+keys, well below the 32 bits the field width suggests. None of which matters
+much, since the key is stored in the container anyway.
 
 ## The obfuscation does not protect the code
 

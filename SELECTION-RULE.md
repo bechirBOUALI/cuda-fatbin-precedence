@@ -240,8 +240,8 @@ The full matrix, row by row with what each row establishes, is in
 
 The obvious objection is that these containers were built to conflict. So the
 same readings were run against every fat binary in the CUDA toolkit's own
-shipped libraries, which nobody here built or tampered with: 343 containers
-across 14 libraries, of which 339 hold more than one entry.
+shipped libraries, which nobody here built or tampered with: 3516 containers
+across 21 libraries, of which 2414 hold more than one entry.
 
 The evidence here is one step weaker, and the distinction is worth keeping.
 Those libraries carry no marker to read back, so nothing can be loaded and
@@ -251,24 +251,33 @@ above establishes, agreeing with the GPU on all 40 built containers.
 
 | How a tool picks the entry to inspect | Disagrees with the driver's rule |
 |---|---|
-| first-match | 342 of 343 |
-| exact-arch | 195 of 343 |
-| prefer-PTX | 342 of 343 |
+| first-match | 1262 of 3516 |
+| exact-arch | 378 of 3516 |
+| prefer-PTX | 1262 of 3516 |
 
-No attacker is involved in that table. NVIDIA ships one entry per architecture
-in ascending order, so a first-match reading reliably lands on the lowest,
-which on this GPU is usually sm_75. A lone sm_75 cubin is refused outright on
-an sm_89 GPU with `CUDA_ERROR_NO_BINARY_FOR_GPU`, because cubins are compatible
-only inside their major generation. First-match is therefore not choosing a
-suboptimal entry on real libraries. It is naming an entry the GPU would
-refuse.
+No attacker is involved in that table, and the aggregate hides the shape of
+the failure. Where NVIDIA ships one entry per architecture in ascending order,
+which is cuBLAS and the entire NPP family, a first-match reading lands on the
+lowest, usually sm_75, and a lone sm_75 cubin is refused outright on an sm_89
+GPU with `CUDA_ERROR_NO_BINARY_FOR_GPU`, because cubins are compatible only
+inside their major generation. There, first-match is not choosing a suboptimal
+entry: it is naming an entry the GPU would refuse, on 192 of cuBLAS's 193
+containers and on every NPP container. cuBLASLt holds 2617 of the 3516 and
+ships many single-entry and exact-match containers, so first-match fares much
+better there and drags the average down to a third. A scanner whose error rate
+depends on which library it meets is worse than one that is uniformly wrong,
+because the good cases teach you to trust it.
 
-The careful reading, exact architecture match, is right on most shipped
-libraries, and 192 of its 195 failures are in cuBLAS, which ships no sm_89
-cubin at all: its containers carry sm_75, sm_80, sm_86, sm_90, sm_100 and
-sm_120, so there is no exact match to find and it falls back to first-match.
-Correct on benign input, wrong on the rest, is the least useful property a
-scanner rule can have.
+The careful reading, exact architecture match, is right on 3138 of the 3516.
+Its failures cluster: 192 in `libcublas.so`, which ships no sm_89 cubin at all,
+its containers carrying sm_75, sm_80, sm_86, sm_90, sm_100 and sm_120, so there
+is no exact match to find and it falls back to first-match, and 172 in
+cuBLASLt, which does ship sm_89. Correct on benign input, wrong on the rest, is
+the least useful property a scanner rule can have.
+
+cuBLASLt also settles a question the crafted corpus could only demonstrate: it
+ships 1376 entries declaring `sm_90a`, 1133 declaring `sm_120f` and 2 declaring
+`sm_100a`, so the suffix bits appear at scale in code nobody here built.
 
 Nor does it take a multi-architecture build. An ordinary `nvcc -arch=sm_89 -c`
 with no other flags emits one container holding an sm_89 cubin and a
@@ -408,8 +417,9 @@ than assuming the local GPU, and takes the host policy as an argument so the
 raw container, a shared library or executable through the registration
 wrappers, and a relocatable object by walking `.nv_fatbin` directly, since in
 an object file the wrapper's pointer is not filled in until link time. It
-agrees with the driver on all forty-one measured cases, including the three
-where the right answer is that nothing runs.
+agrees with the driver on all forty-one measured cases, including the five
+where the right answer is that nothing runs and the two where the entry is
+selected and then refused.
 
 Three implementation details matter more than they look.
 
@@ -424,7 +434,7 @@ such a parser reads them as garbage.
 
 The optional identifier and ptxas-options strings are bounds-checked against
 the declared header size, and violations are recorded as notes rather than
-raised, because a scanner has to keep going and report what it saw. All 343
+raised, because a scanner has to keep going and report what it saw. All 3516
 shipped containers parsed with no notes.
 
 For tooling that cannot adopt the rule, the minimum honest behaviour is to
@@ -447,10 +457,10 @@ Where it matters is an attacker who can ship a binary, which is the real supply
 chain for ML wheels and container images. It is not remote code execution.
 Every payload here writes a marker value and nothing else.
 
-Separately, containers whose declared sizes are malformed rather than merely
-misleading can make the driver refuse, fault or fail to return. Those cases are
-measured and are being reported to NVIDIA; they are deliberately not in this
-repository, and nothing above depends on them.
+Separately, containers whose metadata is malformed rather than merely
+misleading, in more than one field, can make the driver refuse, fault or fail
+to return. Those cases are measured and are with NVIDIA; they are deliberately
+not in this repository, and nothing above depends on them.
 
 Open items: kind 0x10 is an ELF the driver finalizes before load, on the
 evidence of a handler whose whole error vocabulary is NVIDIA's Mercury

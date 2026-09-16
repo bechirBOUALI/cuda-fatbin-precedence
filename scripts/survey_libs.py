@@ -30,7 +30,7 @@ def survey_file(path, sm):
     total = multi = notes = 0
     for _desc, off, blob in fp.find_containers(path):
         try:
-            _hdr, entries = fp.parse_container(blob, off)
+            hdr, entries = fp.parse_container(blob, off)
         except ValueError:
             notes += 1
             continue
@@ -39,7 +39,10 @@ def survey_file(path, sm):
         total += 1
         if len(entries) > 1:
             multi += 1
-        if any(e.notes for e in entries):
+        # Count container-level notes as well as entry-level ones. Counting
+        # only the entries would let a container whose own header is the
+        # problem, a truncated fat_size or an entry outside it, pass as clean.
+        if any(e.notes for e in entries) or getattr(hdr, "notes", None):
             notes += 1
         winner = fp.would_execute(entries, sm)
         target = winner.index if winner else None
@@ -55,8 +58,14 @@ def main():
     ap.add_argument("paths", nargs="*",
                     default=["/usr/local/cuda-13.2/lib64"])
     ap.add_argument("--sm", type=int, default=89)
-    ap.add_argument("--max-bytes", type=int, default=60_000_000,
-                    help="skip larger files; hashing every payload is not free")
+    # No size limit by default. An earlier default of 60 MB silently dropped
+    # nine libraries, libcublasLt among them, which alone holds 2617 of the
+    # toolkit's 3516 containers, so the survey described a fraction of the
+    # toolkit while the write-up claimed all of it. Pass --max-bytes to trade
+    # coverage for speed, and say so if you quote the result.
+    ap.add_argument("--max-bytes", type=int, default=0,
+                    help="skip files larger than this many bytes; 0, the "
+                         "default, reads every library, which takes minutes")
     args = ap.parse_args()
 
     files = []
@@ -76,7 +85,7 @@ def main():
     grand = {name: 0 for name, _ in READINGS}
     g_total = g_multi = g_notes = g_files = 0
     for path in files:
-        if os.path.getsize(path) > args.max_bytes:
+        if args.max_bytes and os.path.getsize(path) > args.max_bytes:
             continue
         try:
             total, multi, wrong, notes = survey_file(path, args.sm)

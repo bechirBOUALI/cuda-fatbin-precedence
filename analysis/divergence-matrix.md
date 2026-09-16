@@ -186,17 +186,27 @@ take the host policy as an input, which `would_execute()` does.
 The matrix is built from containers made to conflict, which invites the
 objection that the conflicts are artificial. So here is the same comparison
 against every fat binary in the CUDA toolkit's own shipped libraries, none of
-which were built here:
+which were built here. Every library is read, with no size limit: an earlier
+run of this survey capped files at 60 MB, which silently dropped nine libraries
+including cuBLASLt, and the numbers it reported described a seventh of the
+toolkit while the text claimed all of it.
 
 ```
 library                            cont multi first-match  exact-arch  prefer-PTX  notes
 libcublas.so.13.4.1.3               193   192         192         192         192      0
+libcublasLt.so.13.4.1.3            2617  1540         398         172         398      0
+libcufft.so.12.2.0.57                 1     0           1           1           1      0
 libcufftw.so.12.2.0.57                1     0           1           1           1      0
 libcufile.so.1.17.1                   1     1           1           0           1      0
+libcurand.so.10.4.2.66               11    11          11           0          11      0
+libcusolver.so.12.2.0.11            235   235         230           3         230      0
+libcusolverMg.so.12.2.0.11          109   109         104           3         104      0
+libcusparse.so.12.7.10.12           136   116         112           4         112      0
 libnppc.so.13.1.0.59                  1     0           1           1           1      0
 libnppial.so.13.1.0.59               11    11          11           0          11      0
 libnppicc.so.13.1.0.59               13    13          13           0          13      0
 libnppidei.so.13.1.0.59              26    26          26           0          26      0
+libnppif.so.13.1.0.59                64    64          64           0          64      0
 libnppig.so.13.1.0.59                15    15          15           0          15      0
 libnppim.so.13.1.0.59                12    12          12           0          12      0
 libnppist.so.13.1.0.59               24    24          24           0          24      0
@@ -204,26 +214,40 @@ libnppisu.so.13.1.0.59                1     0           1           1           
 libnppitc.so.13.1.0.59                3     3           3           0           3      0
 libnpps.so.13.1.0.59                 31    31          31           0          31      0
 libnvjpeg.so.13.1.0.59               11    11          11           0          11      0
-TOTAL, 14 libraries                 343   339         342         195         342      0
+TOTAL, 21 libraries                3516  2414        1262         378        1262      0
 ```
 
 Reproduce with `python3 scripts/survey_libs.py`.
 
-**The divergence does not need an attacker.** 339 of 343 shipped containers
-hold more than one entry, and first-match names the wrong entry in 342 of them.
-NVIDIA ships one entry per architecture in ascending order, so first-match
-lands on the lowest, which here is usually sm_75, shown in row 12 to be
-unrunnable on this GPU. The four single-entry containers do not rescue it:
-three hold one sm_75 cubin and nothing else, so on this GPU they carry no
-runnable code at all, and every reading still names an entry that cannot
-execute.
+**The divergence does not need an attacker.** 2414 of the 3516 shipped
+containers hold more than one entry, so about two files in three force the
+question, and first-match names an entry other than the one the driver selects
+on 1262 of them.
 
-**exact-arch is right until it is not.** It reads the correct entry in 148 of
-the 343, and 192 of its 195 failures are in cuBLAS, which ships no sm_89 cubin
-at all: its containers carry sm_75, sm_80, sm_86, sm_90, sm_100 and sm_120, so
-there is no exact match to find and it degrades to first-match. A rule that is
-correct on benign input and wrong on the rest is the least useful kind of rule
-to put in a scanner.
+The rate varies enormously by library, and the reason is worth stating rather
+than averaging away. The NPP family, cuSOLVER and cuBLAS ship one entry per
+architecture in ascending order, so first-match lands on the lowest, usually
+sm_75, shown in row 12 to be unrunnable on this GPU: it is wrong on 192 of
+cuBLAS's 193 containers and on every NPP container. cuBLASLt, which alone holds
+2617 of the toolkit's containers, ships many single-entry and exact-match
+containers, so first-match is right there more often than not. A scanner's
+error rate therefore depends on which library it happens to meet, which is a
+worse property than a uniformly high rate would be.
+
+**exact-arch is right until it is not.** It reads the correct entry in 3138 of
+the 3516, and its failures cluster: 192 in `libcublas.so`, which ships no sm_89
+cubin at all, its containers carrying sm_75, sm_80, sm_86, sm_90, sm_100 and
+sm_120, so there is no exact match to find and it degrades to first-match, and
+172 in cuBLASLt. Note the scope: cuBLASLt *does* ship sm_89, 247 entries of it,
+so the statement is about `libcublas.so` and not about cuBLAS as a product. A
+rule that is correct on benign input and wrong on the rest is the least useful
+kind of rule to put in a scanner.
+
+**The suffix bits are not a laboratory curiosity either.** cuBLASLt ships 1376
+entries declaring `sm_90a`, 1133 declaring `sm_120f` and 2 declaring `sm_100a`,
+which is finding 4 visible at scale in code nobody here built: the architecture
+is a rendered name, and a listing that drops the suffix is naming a target the
+driver does not match on.
 
 **And it does not need a multi-architecture build either.** An ordinary
 `nvcc -arch=sm_89 -c` with no other flags emits one container holding an
@@ -234,15 +258,16 @@ sm_75, and on this GPU that flips: the sm_75 cubin is the wrong generation, so
 the PTX is the only candidate and the driver JITs it, while first-match and
 exact-arch both report the cubin.
 
-Every one of the 343 containers parsed with no structural complaint, so the
+Every one of the 3516 containers parsed with no structural complaint, so the
 parser is exercised on real shipped code and not only on its own corpus. One of
 them made the point about compression concretely. A PTX entry in `libcufile`
 carries flags `0x2011`, bit 13 rather than the zstd bit 15: Stealthium's
 published `BinInfo` enum names bit 13 `LZ4Compression`, alongside
 `ZLIBCompression` at bit 12 and a second LZ4 variant at bit 14, so the field
 carries a compression family and not a single bit. A parser keying on the zstd
-bit alone hashes 3061 bytes of compressed data where the device code is 10879
-bytes of PTX, which is the same aliasing this document warns about elsewhere.
+bit alone hashes compressed bytes, the 3061 the stream occupies or the 3064 the
+padded payload declares, where the device code is 10878 bytes of PTX, which is
+the same aliasing this document warns about elsewhere.
 This parser decodes LZ4 as well, so the hash covers the code.
 
 ## A separate question: does anything validate payloads

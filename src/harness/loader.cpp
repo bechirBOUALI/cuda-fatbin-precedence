@@ -1,4 +1,4 @@
-// loader.cpp - fatbin entry-precedence harness (Step 1).
+// loader.cpp - fatbin entry-precedence harness.
 //
 // Loads a module image (fatbin, cubin, or PTX) supplied on the command line,
 // looks up the kernel "probe", launches it, and reports the marker it wrote.

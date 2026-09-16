@@ -12,9 +12,16 @@ CUOBJDUMP=${CUOBJDUMP:-/usr/local/cuda-13.2/bin/cuobjdump}
 zluda="$here/zluda_probe/target/release/zluda_probe"
 dd="$here/dd_probe/dd_probe"
 
-for p in "$zluda" "$dd"; do
-    [ -x "$p" ] || { echo "missing $p, run $here/fetch.sh first" >&2; exit 1; }
-done
+# Run whichever probes were built. A reader with cargo but no go should still
+# get three of the four columns rather than nothing at all.
+[ -x "$zluda" ] || echo "note: $zluda not built, skipping the zluda column" >&2
+[ -x "$dd" ] || echo "note: $dd not built, skipping the datadog column" >&2
+if [ ! -x "$zluda" ] && [ ! -x "$dd" ]; then
+    echo "neither probe is built: run $here/fetch.sh first" >&2
+    exit 1
+fi
+run_probe() { [ -x "$1" ] && LD_LIBRARY_PATH="$here/upstream/stubs" "$1" "$2" \
+              || echo "not built"; }
 
 cases=${*:-"elf80a_elf86b ptxa_elfb ptx_ab"}
 
@@ -28,7 +35,7 @@ for c in $cases; do
            | awk '/EXECUTES/{print "entry " $1}')
     printf '%-18s | %-22s | %-24s | %-26s | %s\n' \
            "$c" "lists $n, marks none" \
-           "$(LD_LIBRARY_PATH="$here/upstream/stubs" "$dd" "$f")" \
-           "$(LD_LIBRARY_PATH="$here/upstream/stubs" "$zluda" "$f")" \
+           "$(run_probe "$dd" "$f")" \
+           "$(run_probe "$zluda" "$f")" \
            "${ours:-nothing runs}"
 done

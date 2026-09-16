@@ -70,9 +70,11 @@ KIND_NAMES = {
 }
 
 # The driver ranks candidate entries by kind before it considers anything else.
-# Order recovered from the two hard-coded comparisons at 0x474766 and 0x474906:
-# ELF beats 0x10 beats PTX beats the rest. Anything absent here is unranked and
-# never wins against a ranked entry.
+# Order read out of the ranker, which tests each kind on both sides before
+# anything else is considered, at 0x474fcc and 0x474fde for PTX and 0x474feb
+# and 0x474ff6 for kind 0x80: ELF beats 0x10 beats PTX beats the rest. Anything
+# absent here is unranked and never wins against a ranked entry. The full
+# cascade is in analysis/decompiled-selection.md.
 KIND_RANK = {KIND_ELF: 3, 0x10: 2, KIND_PTX: 1}
 
 # Entry `flags` bits. 0x8000 marks a zstd-compressed payload.
@@ -439,7 +441,13 @@ class Entry:
         ident = grab(h.ident_offset, h.ident_length, "identifier")
 
         options = ""
+        # The descriptor lives in the variable part of the header, past the
+        # fixed 64 bytes. A zero offset means there is no descriptor at all, and
+        # reading one anyway lands on the entry's own kind and version fields
+        # and reports them as a malformed string. A stock
+        # `fatbinary --ident=...` container has exactly that shape.
         if (h.header_size > FIXED_ENTRY_HEADER
+                and FIXED_ENTRY_HEADER <= h.opts_desc_offset
                 and h.opts_desc_offset + 8 <= limit
                 and base + h.opts_desc_offset + 8 <= len(blob)):
             oo, ol = struct.unpack_from(
@@ -533,6 +541,11 @@ class Entry:
         dump prints sm_89a. Anything matching on the listing is therefore
         matching on a name the driver does not use.
         """
+        # The driver bounds the architecture to 1..999 before rendering the
+        # name, cmp $0x3e6 at 0x474b59, so a value outside that range is not a
+        # target at all and printing sm_<huge> would invent one.
+        if not 1 <= self.arch <= 999:
+            return f"invalid ({self.arch})"
         prefix = "compute_" if self.kind == KIND_PTX else "sm_"
         return f"{prefix}{self.arch}{self.arch_suffix}"
 
@@ -573,6 +586,10 @@ def parse_container(blob, offset=0):
     Everything the walk has to clamp for its own safety, rather than because
     the driver does, is recorded as a note instead of passing in silence.
     """
+    if len(blob) - offset < 16:
+        raise InputError(
+            f"only {len(blob) - offset} bytes at offset {offset:#x}, too few "
+            f"for the 16-byte container header")
     hdr = FatBinHeader.from_buffer_copy(bytes(blob[offset:offset + 16]))
     if not hdr.is_valid():
         raise ValueError(f"no fat binary magic at offset {offset:#x}")
@@ -620,15 +637,19 @@ def parse_container(blob, offset=0):
         # worse than useless, so say what is there and stop.
         room = len(blob) - pos
         if eh.kind not in KIND_NAMES or eh.header_size > room:
+            reason = (f"kind {eh.kind:#x} is not a fat binary entry kind"
+                      if eh.kind not in KIND_NAMES else
+                      f"its header_size {eh.header_size} exceeds the {room} "
+                      f"bytes left in the buffer")
+            blamed = (f", and the walk reached them because entry "
+                      f"{len(entries) - 1} declares a payload shorter than the "
+                      f"one the driver reads" if entries else "")
             preview = bytes(blob[pos:pos + 16])
             container.notes.append(
                 f"the bytes at offset {pos:#x} do not parse as an entry "
-                f"header: kind {eh.kind:#x} is not a fat binary entry kind, "
-                f"and the walk reached them because entry {len(entries) - 1} "
-                f"declares a payload shorter than the one the driver reads. "
-                f"They are {preview!r}. The driver reads them as a header too, "
-                f"finds nothing it can select, and its stride carries the walk "
-                f"past the end of the container")
+                f"header: {reason}{blamed}. They are {preview!r}. The driver "
+                f"reads them as a header too, finds nothing it can select, and "
+                f"its stride carries the walk past the end of the container")
             break
 
         entry = Entry(len(entries), pos, eh, blob)

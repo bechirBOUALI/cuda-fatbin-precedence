@@ -6,8 +6,8 @@ that entry. The container states two sizes and neither means what a reader
 would assume, so a tool can hash the right entry and still hash the wrong
 bytes.
 
-Both cases were listed as open in earlier versions of this repository. They are
-settled here, by execution.
+Both cases were open questions when the precedence rule was first measured.
+They are settled here, by execution.
 
 | | |
 |---|---|
@@ -104,8 +104,8 @@ reports two live entries.
 
 `trunc_high.fatbin` declares `0x100000C68`. The low 32 bits are 3176, so the
 driver walks exactly one entry, while a u64 reader sees a container of 4 GB.
-Measured, and matching the `movslq %esi,%rax` at `0x47b6f1` recorded in
-`driver-selection-logic.md`.
+Measured, and matching the `movslq %esi,%rax` at `0x47b6f1`, which is quoted in
+`decompiled-selection.md` where the walk's bound is discussed.
 
 ## What each reader sees
 

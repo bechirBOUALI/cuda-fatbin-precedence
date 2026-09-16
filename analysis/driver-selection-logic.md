@@ -147,6 +147,21 @@ order can overturn a kind preference:
 475029:  cmp    %eax,0x0(%r13)       ; architectures compared
 ```
 
+That last comparison is the whole of level 2, so it is worth quoting in full
+rather than in passing. It is a three-way branch, not an equality test, which
+is what makes proximity rather than exact match the rule:
+
+```
+475026:  mov    (%r15),%eax          ; incumbent architecture
+475029:  cmp    %eax,0x0(%r13)       ; against the candidate's
+47502d:  je     4751f8               ; equal, fall through to the tie-breaks
+475033:  jle    475117               ; ordered, and the nearer one is kept
+```
+
+An equality test alone would keep an sm_80 incumbent against an sm_86
+challenger on an sm_89 GPU. The measured result is the opposite, `elf80a_elf86b`
+runs the sm_86 entry, and the ordered branch at `0x475033` is why.
+
 Its tail separates two entries that tie on kind and architecture, and flag bit
 24 decides there: where exactly one of the two carries `0x1000000`, the entry
 **without** it is returned. Only when both agree on that bit does the last

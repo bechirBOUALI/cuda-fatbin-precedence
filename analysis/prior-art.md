@@ -142,4 +142,7 @@ can establish" rather than "first".
 - cudaparsers, https://github.com/vivekpanyam/cudaparsers
 - ZLUDA, `zluda/src/impl/module.rs`, https://github.com/vosen/ZLUDA
 - CUpti_ModuleResourceData, NVIDIA, https://docs.nvidia.com/cupti/api/structCUpti__ModuleResourceData.html
-- Patrick Wardle on macOS universal binary slice selection, 2024, https://objective-see.org/blog.html
+- Patrick Wardle, "Fool Us Once, Shame On You..." on macOS universal binary
+  slice selection and `macho_best_slice()`, Objective-See blog, 2024,
+  https://objective-see.org/blog.html
+- Datadog agent, `pkg/gpu/cuda`, https://github.com/DataDog/datadog-agent

@@ -29,7 +29,7 @@ can be answered without a GPU to answer it on.
 | # | Finding | Evidence |
 |---|---|---|
 | 1 | Selection is a hierarchy: compatibility filter, then kind, then architecture proximity, then flag bit 24, then file order | [entry-precedence](analysis/entry-precedence.md) |
-| 2 | File order reverses by kind: the **first** cubin wins, the **last** PTX wins | [entry-precedence](analysis/entry-precedence.md) |
+| 2 | File order reverses by kind, among entries that tie on everything above it: the **first** cubin wins, the **last** PTX wins | [entry-precedence](analysis/entry-precedence.md) |
 | 3 | Flag bit 24 breaks a cubin tie, and the entry **without** it wins | [entry-precedence](analysis/entry-precedence.md) |
 | 4 | Flag bits 20 and 21 encode the `a` and `f` architecture-name suffix; the driver matches on the rendered name `sm_<arch><suffix>` | [driver-selection-logic](analysis/driver-selection-logic.md) |
 | 5 | Architecture is declared twice; selection reads the entry header, validation reads the embedded ELF, in that order | [entry-precedence](analysis/entry-precedence.md) |
@@ -37,7 +37,7 @@ can be answered without a GPU to answer it on.
 | 7 | Nothing validates payloads; a two-byte edit inside compiled SASS loads and runs | [driver-selection-logic](analysis/driver-selection-logic.md) |
 | 8 | Flag bit 16 marks obfuscation; the key sits in the entry header and the transform is reversible from the file alone | [ptx-obfuscation](analysis/ptx-obfuscation.md) |
 | 9 | `--okey` collides two inputs through a decimal-to-hex round trip, leaving well under 32 bits of key space | [ptx-obfuscation](analysis/ptx-obfuscation.md) |
-| 10 | Decompression is keyed by a flag bit rather than by entry kind, and the decompressed size is not where format notes place it | [driver-selection-logic](analysis/driver-selection-logic.md) |
+| 10 | Decompression is keyed by flag bits rather than by entry kind, and those bits carry a family: zstd in a default build, LZ4 in one shipped library | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md), [divergence-matrix](analysis/divergence-matrix.md) |
 | 11 | Entry kinds 0x20, 0x80 and 0x100 are `index`, `tile ir` and `contatenated entry`, NVIDIA's own spelling | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 | 12 | Kind 0x10 is an ELF the driver finalizes before load. **Inference**, not confirmed: NVIDIA names it nowhere | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 | 13 | `payload_size` advances the walk but does not bound the read: PTX is read to the first NUL, an ELF to the extent its own headers describe. Two containers declaring byte-identical payloads run different kernels | [declared-versus-executed](analysis/declared-versus-executed.md) |
@@ -56,8 +56,10 @@ architecture, the flag bit, the file position. Entry 4 survives and runs.
 That container is real, and it is in the corpus as `six_entry.fatbin`.
 Clearing bit 24 on entry 3 changes the marker the GPU returns from `0xBBBB` to
 `0xAAAA`, because entry 3 then wins on file order instead. Nothing else in the
-file changes, and both containers are built by `make -C src/kernels` and
-measured the same way as every other row.
+file changes. Both containers are built by `make -C src/kernels` and measured
+with the same loader as the corpus, though they are demonstrations rather than
+matrix rows: the matrix pairs entries to isolate one rule at a time, and this
+container exercises all five at once.
 
 Open [docs/entry-selection.html](docs/entry-selection.html) for the same
 walkthrough with a pause control, or
@@ -94,11 +96,13 @@ uncharacterised.
 
 ## Why it matters
 
-Selection only matters when a container holds more than one candidate, and it
-almost always does: **339 of the 343** fat binaries in the CUDA toolkit's own
+Selection only matters when a container holds more than one candidate, and
+most of them do: **2414 of the 3516** fat binaries in the CUDA toolkit's own
 shipped libraries carry more than one entry. Any tool reading GPU code out of a
-binary therefore has to decide which entry it is reading, on nearly every file
-it meets.
+binary therefore has to decide which entry it is reading, on about two files in
+three. In the libraries that ship one entry per architecture in ascending
+order, cuBLAS and the whole NPP family, a first-match reading is wrong on
+essentially every container.
 
 Nothing in the container answers that for it, and no tool that reads the file
 does either. `cuobjdump` lists every entry with nothing marking which one the
@@ -205,7 +209,10 @@ undocumented, it is unimplemented outside NVIDIA.
 Every cell above was measured, the tools built from pinned upstream commits and
 run locally, with the last column read back from the GPU. `tools/fetch.sh`
 clones both upstreams at those pins and builds a thin probe against each
-parser; `tools/run.sh` reproduces the table. Neither probe reimplements any
+parser; `tools/run.sh` runs all four readers over the same containers and prints their
+raw output; the table above renders that output in prose, and the Datadog cell
+names an entry index the probe does not print, inferred from the kernel it
+reports. Neither probe reimplements any
 parsing, and [tools](tools/README.md) says what each one does and does not
 cover. No evasion of a
 security product is claimed, because no open-source GPU-code security scanner
@@ -221,9 +228,11 @@ equivalent call.
 `scripts/fatbin_entry_selection.py` answers the question the format does not:
 for each entry, whether the driver would execute it.
 
-- **It can answer "nothing runs."** A first-match scanner structurally cannot
-  produce that verdict, yet it is the correct answer for three container shapes
-  here.
+- **It can answer "nothing runs."** That is the correct answer on five rows of
+  the matrix, and two more where the entry is selected and then refused. A
+  reading that returns the first plausible entry has no way to reach that
+  verdict from its own logic; where the matrix shows one reaching it, it is
+  borrowing this parser's entry list.
 - **It takes the target and the host policy as arguments**, so `sm_90a` and a
   `CUDA_FORCE_PTX_JIT` host are parameters rather than separate code paths.
 - **It hashes the decompressed payload**, so identical device code cannot hash
@@ -242,17 +251,18 @@ for each entry, whether the driver would execute it.
 - **It reports an obfuscated entry as a distinct outcome**, not as an entry
   with no code, which is how the shipped tooling presents it.
 
-All 343 shipped containers parse with no structural complaint, so it is
+All 3516 shipped containers parse with no structural complaint, so it is
 exercised on real code and not only on its own corpus. That includes one PTX
 entry in `libcufile` compressed with LZ4 rather than zstd: the flags field
 carries a compression family, named in Stealthium's published `BinInfo` enum,
-and a parser that keys on the zstd bit alone hashes 3061 bytes of compressed
-data in place of 10879 bytes of PTX.
+and a parser that keys on the zstd bit alone hashes compressed bytes, 3061 of
+them or the 3064 the padded payload declares, in place of 10878 bytes of PTX.
 
 ## Reproducing
 
-Needs a CUDA toolkit, a supported GPU, and Python with `pyelftools` and
-`zstandard`.
+Needs a CUDA toolkit, a supported GPU, and Python with `pyelftools`,
+`zstandard` and `lz4`. Without `lz4` one shipped container cannot be
+decompressed and the survey reports a note against it.
 
 ```sh
 make -C src/kernels                  # cubins, PTX, and the corpus containers
@@ -292,7 +302,9 @@ The driver reverse engineering was done on the same build, so both halves agree
 on version, and the addresses are build-specific: they will not survive a
 driver update.
 
-No selection behaviour here is a driver vulnerability. The driver applies its
-own rule correctly and consistently; the gap is between that rule and the one a
+No selection behaviour here is a driver vulnerability. Malformed metadata is a
+different matter, and those cases are with NVIDIA rather than in this
+repository. For selection itself the driver applies its own rule correctly and
+consistently; the gap is between that rule and the one a
 convenient static reading uses, and it lives in the tooling. Every payload in
 this repository writes a marker value and nothing else.

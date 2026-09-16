@@ -4,7 +4,6 @@ build/
 *.ptx
 *.fatbin
 loader
-leaktest
 __pycache__/
 *.pyc
 tools/upstream/

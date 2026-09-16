@@ -245,12 +245,11 @@ document is about.
 
 ## Method note on counting containers
 
-`grep` on this machine resolves to `ugrep`, which does not match raw byte
-patterns passed as `$'\x50\xed\x55\xba'` and silently reports zero hits even
-when the magic is at offset 0. Counting magics by piping to `grep -c` is also
-wrong regardless of implementation, since it counts matching *lines* and binary
-data puts many magics on one line. Walk the headers with a real parser instead:
-read the magic, `headerSize` and `fatSize`, then jump by `headerSize + fatSize`.
+Counting containers by grepping for the magic is wrong, whatever the grep. It
+counts matching *lines*, and binary data puts many magics on one line; some
+implementations also refuse raw byte patterns and report zero hits when the
+magic sits at offset 0. Walk the headers with a real parser instead: read the
+magic, `headerSize` and `fatSize`, then jump by `headerSize + fatSize`.
 
 ## Reproduction
 
@@ -271,9 +270,9 @@ The full corpus, measured against the GPU row by row, is in
 
 ## Settled elsewhere
 
-Two conflict cases were open in earlier versions of this document: a payload
-hidden in the slack when the declared payload size exceeds the real one, and an
-entry positioned past the declared container size. Both are measured in
+Two conflict cases were left open when this document was first written: a
+payload hidden in the slack when the declared payload size exceeds the real one,
+and an entry positioned past the declared container size. Both are measured in
 `declared-versus-executed.md`. The short answer is that neither size field is a length:
 `payload_size` advances the walk without bounding the read, so two containers
 declaring byte-identical payloads run different kernels, and `fat_size` is
