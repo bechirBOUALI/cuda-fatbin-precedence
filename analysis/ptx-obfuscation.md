@@ -52,7 +52,7 @@ Building the same PTX three ways, on this toolkit:
 | `--okey=12345 -reorder-obfuscation` | 1 | **`0x18011`** | not a valid zstd frame; 234 bytes differ |
 
 So obfuscation is a **flag, not a kind**. The entry stays kind 1, and bit 16
-of the entry `flags` field marks it. That is a third distinct use of that
+of the entry `bin_info` field marks it. That is a third distinct use of that
 field, alongside bits 20 and 21 for the architecture-name suffix and bit 24 for
 the cubin tie-break.
 
@@ -68,10 +68,12 @@ for padding, holds the key.
 
 The stored value looks at first like BCD, the decimal digits of the key read as
 hex nibbles: `--okey=12345` stores `0x12345`, `--okey=1000000` stores
-`0x1000000`. It is not a deliberate encoding. `fatbinary` parses the option with
-a base-prefix-aware integer parse, then re-emits it as a **decimal** string for
-the creation library, which parses it back as **hex**. The round trip is what
-produces the digit-preserving pattern, and two inputs settle it:
+`0x1000000`. It is not a deliberate encoding. `fatbinary` parses the option as a
+**32-bit hex value**, which is visible in its own diagnostics, `--okey=DEADBEEF`
+is rejected with "expected a number" and `--okey=305419896` with "32-bit hex
+value (305419896) out of range", so the argument is filtered to decimal digits
+on the way in and read as hex on the way out. The round trip is what produces
+the digit-preserving pattern, and two inputs settle it:
 
 | `--okey` | stored |
 |---|---|

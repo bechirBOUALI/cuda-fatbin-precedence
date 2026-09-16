@@ -45,10 +45,10 @@ call sites between the three functions.
 
 ```c
         container = state[0xb];   // container = state->[0x58]  (state is long*, 0xb*8 = 0x58)   VA 0x47b687
-        fat_size = *(undefined8 *)(container + 8);   // fat_size = u64 @ container+0x08   VA 0x47b68f
+        fatbin_size = *(undefined8 *)(container + 8);   // fatbin_size = u64 @ container+0x08   VA 0x47b68f
         first_entry = (uint *)((ulong)*(ushort *)(container + 6) + container);
         // first entry = container + (u16 header_size @ container+0x06)   VA 0x47b68b
-        if ((int)fat_size < 1) {
+        if ((int)fatbin_size < 1) {
 LAB_0057be94:
           state[0xd] = 0;
 ```
@@ -59,8 +59,8 @@ and the loop advances by a stride it takes from each entry:
             group_entry = group_entry_next;
             entry = (uint *)((long)entry + (ulong)entry[1] + *(long *)(entry + 2));
             // stride = (u32 header_size @ entry+0x04) + (u64 payload_size @ entry+0x08)   VA 0x47b6e6/0x47b6ea
-          } while ((long)entry - (long)first_entry < (long)(int)fat_size);
-          // walk until fat_size bytes consumed   VA 0x47b6f1/0x47b6fe
+          } while ((long)entry - (long)first_entry < (long)(int)fatbin_size);
+          // walk until fatbin_size bytes consumed   VA 0x47b6f1/0x47b6fe
           if (incumbent == (uint *)0x0) goto LAB_0057be94;
 ```
 
@@ -69,7 +69,7 @@ offset 6 and its entry-array size is at offset 8, so a parser that walks the
 same way the driver does reads those two fields and nothing else. The entry
 stride is `header_size + payload_size` read out of the entry itself, which is
 why assuming a fixed entry size is wrong. And the loop bound is compared as
-`(long)(int)fat_size`, a genuine 32-bit truncation of the container's declared
+`(long)(int)fatbin_size`, a genuine 32-bit truncation of the container's declared
 size and not a decompiler artifact; the instruction is `movslq %esi,%rax` at
 `0x47b6f1`.
 

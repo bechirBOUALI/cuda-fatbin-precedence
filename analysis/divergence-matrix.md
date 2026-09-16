@@ -67,10 +67,10 @@ each shortcut breaks, not how any particular scanner behaves.
 | same, over the bit 24 tie-break | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 | entry appended past the declared container | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 | same, one byte more declared | **variant_b** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | variant_b |
-| fat_size 3176, entry 1 outside | **variant_a** | variant_a | variant_a | variant_a | variant_a |
-| fat_size 3177, entry 1 starts inside | **variant_b** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | variant_b |
-| fat_size 0x800018D0, negative as int32 | **nothing runs** | nothing runs | nothing runs | nothing runs | nothing runs |
-| fat_size 0x100000C68, low 32 bits used | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| fatbin_size 3176, entry 1 outside | **variant_a** | variant_a | variant_a | variant_a | variant_a |
+| fatbin_size 3177, entry 1 starts inside | **variant_b** | variant_a (wrong) | variant_a (wrong) | variant_a (wrong) | variant_b |
+| fatbin_size 0x800018D0, negative as int32 | **nothing runs** | nothing runs | nothing runs | nothing runs | nothing runs |
+| fatbin_size 0x100000C68, low 32 bits used | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 | PTX A + ELF B, CUDA_FORCE_PTX_JIT=1 | **variant_a** | variant_a | variant_a | variant_a | variant_a |
 
 41 cases over 40 containers, each one measured on the GPU.
@@ -137,7 +137,7 @@ header value. The listing, which is what a tool parses, is the one showing the
 field selection does not use.
 
 **Rows 24 to 28, the flags field decides two different things.** A
-structurally perfect sm_89 cubin with a single bit of the entry `flags` field
+structurally perfect sm_89 cubin with a single bit of the entry `bin_info` field
 set. Bits 20 and 21 are the architecture-name suffix, `a` and `f`, the same
 ones `nvcc` exposes as `sm_90a` and `sm_100f`, so setting bit 20 here makes the
 entry declare `sm_89a`. No GPU reports that target, the container is left with
@@ -166,7 +166,7 @@ row above: not which entry is selected, but which bytes are that entry. Two
 containers declaring byte-identical payloads run different kernels, a PTX entry
 declaring no payload at all runs a full kernel, a second cubin sits unread
 inside a widened declared payload, an entry appended past the declared
-container executes, and a `fat_size` with bit 31 set leaves the driver walking
+container executes, and a `fatbin_size` with bit 31 set leaves the driver walking
 nothing.
 
 The three conventional columns are uninformative on these rows, and the reason

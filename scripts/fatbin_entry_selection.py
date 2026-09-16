@@ -145,8 +145,8 @@ class FatBinCWrapper(ctypes.LittleEndianStructure):
 class FatBinHeader(ctypes.LittleEndianStructure):
     """Container header, 16 bytes, at the start of every fat binary.
 
-    `fat_size` counts the entries only, so the container occupies
-    header_size + fat_size bytes. Walking by that sum is the only reliable way
+    `fatbin_size` counts the entries only, so the container occupies
+    header_size + fatbin_size bytes. Walking by that sum is the only reliable way
     to find container boundaries: scanning for the magic with a text tool gives
     wrong answers, because binary data puts many magics on one "line".
     """
@@ -156,7 +156,7 @@ class FatBinHeader(ctypes.LittleEndianStructure):
         ("magic",       ctypes.c_uint32),
         ("version",     ctypes.c_uint16),
         ("header_size", ctypes.c_uint16),
-        ("fat_size",    ctypes.c_uint64),
+        ("fatbin_size",  ctypes.c_uint64),   # 0x08, the walk bound
     ]
 
     def is_valid(self) -> bool:
@@ -172,36 +172,41 @@ class FatBinEntryHeader(ctypes.LittleEndianStructure):
     reverse engineering alone:
 
       kind                  built one fatbin per libnvfatbin Add* function
-      payload_size          matches the input file length
-      compressed_size       matches the zstd stream length
-      opts_desc_offset      moves with identifier length (see read_strings)
-      version_minor/major   PTX entry reads 9.2, and the decompressed payload
+      padded_payload_size          matches the input file length
+      payload_size       matches the zstd stream length
+      ptxas_options_offset      moves with identifier length (see read_strings)
+      code_version_minor/major   PTX entry reads 9.2, and the decompressed payload
                             begins ".version 9.2"
       arch                  89 for sm_89
-      ident_offset/length   built with --ident=IDENTMARKER99, length 13
+      identifier_offset/length   built with --ident=IDENTMARKER99, length 13
       flags                 bit 0x8000 tracks --compress
       obfuscation_key       carries the value of fatbinary --okey, so it is
                             not a reserved field despite reading zero in
                             every ordinary build
-      decompressed_size     equals the byte count zstd actually produced
+      uncompressed_payload     equals the byte count zstd actually produced
     """
 
     _pack_ = 1
     _fields_ = [
-        ("kind",              ctypes.c_uint16),   # 0x00
-        ("version",           ctypes.c_uint16),   # 0x02, 0x0101 throughout
-        ("header_size",       ctypes.c_uint32),   # 0x04
-        ("payload_size",      ctypes.c_uint64),   # 0x08, padded
-        ("compressed_size",   ctypes.c_uint32),   # 0x10, 0 when stored raw
-        ("opts_desc_offset",  ctypes.c_uint32),   # 0x14, see read_strings
-        ("version_minor",     ctypes.c_uint16),   # 0x18
-        ("version_major",     ctypes.c_uint16),   # 0x1a
-        ("arch",              ctypes.c_uint32),   # 0x1c, 89 == sm_89
-        ("ident_offset",      ctypes.c_uint32),   # 0x20, from entry start
-        ("ident_length",      ctypes.c_uint32),   # 0x24
-        ("flags",             ctypes.c_uint64),   # 0x28
-        ("obfuscation_key",   ctypes.c_uint64),   # 0x30, 0 unless a key was set
-        ("decompressed_size", ctypes.c_uint64),   # 0x38
+        # Field names follow Stealthium's published struct, so that this code
+        # and their write-up can be read side by side. Two of the fields that
+        # write-up marks undocumented are named here for what they were
+        # measured to hold: identifier_length is their field_24, and
+        # obfuscation_key is their field_30.
+        ("kind",                 ctypes.c_uint16),   # 0x00
+        ("version",              ctypes.c_uint16),   # 0x02, 0x0101 throughout
+        ("header_size",          ctypes.c_uint32),   # 0x04
+        ("padded_payload_size",  ctypes.c_uint64),   # 0x08, advances the walk
+        ("payload_size",         ctypes.c_uint32),   # 0x10, stream length, 0 raw
+        ("ptxas_options_offset", ctypes.c_uint32),   # 0x14, see read_strings
+        ("code_version_minor",   ctypes.c_uint16),   # 0x18
+        ("code_version_major",   ctypes.c_uint16),   # 0x1a
+        ("arch",                 ctypes.c_uint32),   # 0x1c, 89 == sm_89
+        ("identifier_offset",    ctypes.c_uint32),   # 0x20, from entry start
+        ("identifier_length",    ctypes.c_uint32),   # 0x24, their field_24
+        ("bin_info",             ctypes.c_uint64),   # 0x28, flags
+        ("obfuscation_key",      ctypes.c_uint64),   # 0x30, their field_30
+        ("uncompressed_payload", ctypes.c_uint64),   # 0x38
     ]
 
 
@@ -247,25 +252,25 @@ class Entry:
         self.hdr = hdr
         self.kind = hdr.kind
         self.arch = hdr.arch
-        self.flags = hdr.flags
+        self.bin_info = hdr.bin_info
         self.kind_name = KIND_NAMES.get(hdr.kind, f"unknown_{hdr.kind:#x}")
-        self.compressed = bool(hdr.flags & FLAG_COMPRESSED)
-        self.lz4 = bool(hdr.flags & (FLAG_LZ4 | FLAG_LZ4_2))
-        self.zlib = bool(hdr.flags & FLAG_ZLIB)
-        # compressed_size is set for every scheme, so it, rather than the zstd
+        self.compressed = bool(hdr.bin_info & FLAG_COMPRESSED)
+        self.lz4 = bool(hdr.bin_info & (FLAG_LZ4 | FLAG_LZ4_2))
+        self.zlib = bool(hdr.bin_info & FLAG_ZLIB)
+        # payload_size is set for every scheme, so it, rather than the zstd
         # bit alone, is what says the stored bytes are not the device code.
         self.stored_compressed = bool(
-            hdr.flags & (FLAG_COMPRESSED | FLAG_LZ4 | FLAG_LZ4_2 | FLAG_ZLIB)
-            or hdr.compressed_size)
-        self.obfuscated = bool(hdr.flags & FLAG_OBFUSCATED)
+            hdr.bin_info & (FLAG_COMPRESSED | FLAG_LZ4 | FLAG_LZ4_2 | FLAG_ZLIB)
+            or hdr.payload_size)
+        self.obfuscated = bool(hdr.bin_info & FLAG_OBFUSCATED)
         # The key is stored as BCD: the decimal digits of the value supplied to
         # fatbinary --okey, read as hex nibbles. 12345 is stored as 0x12345.
         self.obfuscation_key = (f"{hdr.obfuscation_key:x}"
                                 if hdr.obfuscation_key else None)
-        self.arch_suffix = ("a" if hdr.flags & FLAG_ARCH_SUFFIX_A
-                            else "f" if hdr.flags & FLAG_ARCH_SUFFIX_F
+        self.arch_suffix = ("a" if hdr.bin_info & FLAG_ARCH_SUFFIX_A
+                            else "f" if hdr.bin_info & FLAG_ARCH_SUFFIX_F
                             else "")
-        self.deprioritised = bool(hdr.flags & FLAG_DEPRIORITISE)
+        self.deprioritised = bool(hdr.bin_info & FLAG_DEPRIORITISE)
         self.notes = []
 
         self.ident, self.ptxas_options = self.read_strings(blob)
@@ -276,17 +281,30 @@ class Entry:
                 "accurate. This is not an entry with no code")
 
         start = offset + hdr.header_size
-        stored = bytes(blob[start:start + hdr.payload_size])
-        if len(stored) < hdr.payload_size:
+        # Two size fields describe the stored bytes and they disagree under
+        # attack. The u64 at 0x08 is the padded size, which advances the walk;
+        # the u32 at 0x10 is the compressed stream's real length and is 0 when
+        # the payload is stored raw. Slicing by the padded field alone loses a
+        # compressed payload whose padded size is understated, and the driver
+        # still runs it, so take the larger of the two.
+        n_stored = max(hdr.padded_payload_size, hdr.payload_size)
+        stored = bytes(blob[start:start + n_stored])
+        if hdr.payload_size > hdr.padded_payload_size:
             self.notes.append(
-                f"payload truncated: header declares {hdr.payload_size} bytes, "
+                f"the compressed stream is {hdr.payload_size} bytes while "
+                f"the padded payload size declares {hdr.padded_payload_size}: the "
+                f"driver reads the stream, so a reader bounded by the padded "
+                f"size sees less code than runs, or none")
+        if len(stored) < n_stored:
+            self.notes.append(
+                f"payload truncated: header declares {n_stored} bytes, "
                 f"{len(stored)} present")
         self.stored_payload = stored
         self.declared_payload = self.decompress(stored)
         self.declared_sha256 = (hashlib.sha256(self.declared_payload).hexdigest()
                                 if self.declared_payload else None)
 
-        # payload_size is a STRIDE field, not a content length, and the driver
+        # padded_payload_size is a STRIDE field, not a content length, and the driver
         # does not use it to bound what it reads. Resolve the extent the driver
         # actually consumes, per kind, and hash that. See resolve_extent.
         self.payload = self.resolve_extent(blob, start)
@@ -295,7 +313,7 @@ class Entry:
         # same device code hash differently depending only on compression, which
         # is exactly the kind of aliasing an attester must not have.
         self.payload_sha256 = hashlib.sha256(self.payload).hexdigest() if self.payload else None
-        self.stride = hdr.header_size + hdr.payload_size
+        self.stride = hdr.header_size + hdr.padded_payload_size
         self.elf_arch = self.read_elf_arch()
         if self.elf_arch is not None and self.elf_arch != self.arch:
             self.notes.append(
@@ -306,9 +324,9 @@ class Entry:
     def resolve_extent(self, blob, start):
         """The bytes the driver actually reads for this entry.
 
-        `payload_size` advances the walk. It does not bound the read, and the
+        `padded_payload_size` advances the walk. It does not bound the read, and the
         two differ in both directions, which is what breaks a tool that hashes
-        `payload[0 : payload_size]`:
+        `payload[0 : padded_payload_size]`:
 
           PTX   the payload is read as a NUL-terminated string. An entry
                 declaring zero bytes still compiles and runs a full kernel, and
@@ -325,7 +343,7 @@ class Entry:
         if self.obfuscated:
             return self.declared_payload
 
-        declared = self.hdr.payload_size
+        declared = self.hdr.padded_payload_size
 
         if self.kind in (KIND_PTX, KIND_RELOC_PTX):
             if self.stored_compressed:
@@ -337,12 +355,12 @@ class Entry:
             if end - start > declared:
                 self.notes.append(
                     f"PTX text runs {end - start - declared} bytes past the "
-                    f"declared payload_size: the driver reads to the first NUL, "
+                    f"declared padded_payload_size: the driver reads to the first NUL, "
                     f"so hashing the declared bytes hashes neither all nor only "
                     f"the code that runs")
             elif end - start < declared:
                 self.notes.append(
-                    f"declared payload_size covers {declared - (end - start)} "
+                    f"declared padded_payload_size covers {declared - (end - start)} "
                     f"bytes past the PTX terminator, which the driver never "
                     f"reads")
             return bytes(blob[start:end])
@@ -353,12 +371,12 @@ class Entry:
                 if reach > declared:
                     self.notes.append(
                         f"the embedded ELF describes {reach - declared} bytes "
-                        f"past the declared payload_size, and the driver reads "
+                        f"past the declared padded_payload_size, and the driver reads "
                         f"them: bytes outside the declared payload decide "
                         f"whether this entry loads")
                 else:
                     self.notes.append(
-                        f"the declared payload_size covers {declared - reach} "
+                        f"the declared padded_payload_size covers {declared - reach} "
                         f"bytes past the end of the embedded ELF, which the "
                         f"driver never reads. Anything in that gap, a whole "
                         f"second cubin included, is carried by the container "
@@ -438,7 +456,7 @@ class Entry:
             raw = bytes(blob[base + off:base + off + length])
             return raw.split(b"\x00")[0].decode("utf-8", "replace")
 
-        ident = grab(h.ident_offset, h.ident_length, "identifier")
+        ident = grab(h.identifier_offset, h.identifier_length, "identifier")
 
         options = ""
         # The descriptor lives in the variable part of the header, past the
@@ -447,11 +465,11 @@ class Entry:
         # and reports them as a malformed string. A stock
         # `fatbinary --ident=...` container has exactly that shape.
         if (h.header_size > FIXED_ENTRY_HEADER
-                and FIXED_ENTRY_HEADER <= h.opts_desc_offset
-                and h.opts_desc_offset + 8 <= limit
-                and base + h.opts_desc_offset + 8 <= len(blob)):
+                and FIXED_ENTRY_HEADER <= h.ptxas_options_offset
+                and h.ptxas_options_offset + 8 <= limit
+                and base + h.ptxas_options_offset + 8 <= len(blob)):
             oo, ol = struct.unpack_from(
-                "<II", blob, base + h.opts_desc_offset)
+                "<II", blob, base + h.ptxas_options_offset)
             options = grab(oo, ol, "ptxas options")
         return ident, options
 
@@ -470,7 +488,7 @@ class Entry:
             # frame, and reporting a decompression failure here would describe
             # it as corrupt when it is intact and merely unreadable.
             return b""
-        if self.lz4 or (self.hdr.compressed_size and not self.compressed
+        if self.lz4 or (self.hdr.payload_size and not self.compressed
                         and not stored.startswith(ZSTD_MAGIC) and not self.zlib):
             return self.decompress_lz4(stored)
         if self.zlib and not self.compressed:
@@ -486,20 +504,20 @@ class Entry:
             self.notes.append("payload is compressed and the zstandard module is missing")
             return b""
 
-        # compressed_size is the real stream length; payload_size is padded, and
+        # payload_size is the real stream length; padded_payload_size is padded, and
         # feeding the padding to the decompressor is what makes naive readers
         # report a corrupt frame on a perfectly good entry.
-        n = self.hdr.compressed_size or len(stored)
+        n = self.hdr.payload_size or len(stored)
         try:
             out = zstandard.ZstdDecompressor().decompress(
-                stored[:n], max_output_size=max(self.hdr.decompressed_size, 1 << 26))
+                stored[:n], max_output_size=max(self.hdr.uncompressed_payload, 1 << 26))
         except Exception as exc:
             self.notes.append(f"decompression failed: {exc}")
             return b""
-        if self.hdr.decompressed_size and len(out) != self.hdr.decompressed_size:
+        if self.hdr.uncompressed_payload and len(out) != self.hdr.uncompressed_payload:
             self.notes.append(
                 f"decompressed size mismatch: header says "
-                f"{self.hdr.decompressed_size}, got {len(out)}")
+                f"{self.hdr.uncompressed_payload}, got {len(out)}")
         return out
 
     def decompress_lz4(self, stored):
@@ -517,18 +535,18 @@ class Entry:
                 "payload is LZ4-compressed and the lz4 module is missing")
             return b""
 
-        n = self.hdr.compressed_size or len(stored)
-        hint = max(1024, self.hdr.decompressed_size)
+        n = self.hdr.payload_size or len(stored)
+        hint = max(1024, self.hdr.uncompressed_payload)
         for _ in range(8):
             try:
                 out = lz4.block.decompress(stored[:n], uncompressed_size=hint)
             except Exception:
                 hint *= 2
                 continue
-            if self.hdr.decompressed_size and len(out) != self.hdr.decompressed_size:
+            if self.hdr.uncompressed_payload and len(out) != self.hdr.uncompressed_payload:
                 self.notes.append(
                     f"decompressed size mismatch: header says "
-                    f"{self.hdr.decompressed_size}, got {len(out)}")
+                    f"{self.hdr.uncompressed_payload}, got {len(out)}")
             return out
         self.notes.append("LZ4 decompression failed")
         return b""
@@ -560,13 +578,13 @@ class Container:
     def __init__(self, hdr, offset):
         self.version = hdr.version
         self.header_size = hdr.header_size
-        self.fat_size = hdr.fat_size
+        self.fatbin_size = hdr.fatbin_size
         self.offset = offset
         self.notes = []
-        # The driver loads fat_size as a u64 and then truncates it to a signed
+        # The driver loads fatbin_size as a u64 and then truncates it to a signed
         # 32-bit value before using it as the walk bound (`movslq %esi,%rax`).
         # Reading it as a u64 disagrees with the driver by up to 2**64 - 2**32.
-        self.declared = ctypes.c_int32(hdr.fat_size & 0xFFFFFFFF).value
+        self.declared = ctypes.c_int32(hdr.fatbin_size & 0xFFFFFFFF).value
 
 
 def parse_container(blob, offset=0):
@@ -598,14 +616,14 @@ def parse_container(blob, offset=0):
     declared = container.declared
     first = offset + hdr.header_size
 
-    if hdr.fat_size >> 32:
+    if hdr.fatbin_size >> 32:
         container.notes.append(
-            f"fat_size declares {hdr.fat_size} bytes, but the driver truncates "
+            f"fatbin_size declares {hdr.fatbin_size} bytes, but the driver truncates "
             f"it to a signed 32-bit value, {declared}. The upper bits are "
             f"discarded")
-    if hdr.fat_size and declared <= 0:
+    if hdr.fatbin_size and declared <= 0:
         container.notes.append(
-            f"fat_size truncates to {declared}, which is not positive: the "
+            f"fatbin_size truncates to {declared}, which is not positive: the "
             f"driver walks no entries and the container cannot load, however "
             f"many entries a u64-reading parser finds")
     if declared > 0 and first + declared > len(blob):
@@ -683,7 +701,7 @@ def parse_container(blob, offset=0):
 def walk_nv_fatbin(raw, start, size):
     """Yield the offset of every container in .nv_fatbin, by header chaining.
 
-    Read the magic, then jump by header_size + fat_size to reach the next
+    Read the magic, then jump by header_size + fatbin_size to reach the next
     container. This is the only reliable enumeration. Searching for the magic
     with a text tool gives wrong answers, because binary data puts many magics
     on one "line" and a byte pattern can occur inside a payload; chaining
@@ -701,7 +719,7 @@ def walk_nv_fatbin(raw, start, size):
         if not hdr.is_valid():
             break
         yield pos
-        stride = hdr.header_size + hdr.fat_size
+        stride = hdr.header_size + hdr.fatbin_size
         if stride <= 0:
             break
         pos += stride
@@ -769,7 +787,7 @@ def find_containers(path):
         wrappers = bytearray(seg.data()) if seg is not None else bytearray()
         fatbin = elf.get_section_by_name(".nv_fatbin")
         fat_off = fatbin.header["sh_offset"] if fatbin is not None else None
-        fat_size = fatbin.header["sh_size"] if fatbin is not None else 0
+        fatbin_size = fatbin.header["sh_size"] if fatbin is not None else 0
 
     def va_to_off(va):
         for addr, size, off, _name in sections:
@@ -796,7 +814,7 @@ def find_containers(path):
             f"{path} is an ELF with no .nv_fatbin section, so it carries no "
             f"GPU code this tool can read")
         return
-    for foff in walk_nv_fatbin(raw, fat_off, fat_size):
+    for foff in walk_nv_fatbin(raw, fat_off, fatbin_size):
         if foff not in seen:
             yield f"{path} [.nv_fatbin +{foff - fat_off:#x}]", foff, raw
 
@@ -955,7 +973,7 @@ def describe(path, sm, policy, suffix=""):
             "offset": off,
             "version": hdr.version,
             "header_size": hdr.header_size,
-            "fat_size": hdr.fat_size,
+            "fatbin_size": hdr.fatbin_size,
             "container_notes": hdr.notes,
             "policy": policy,
             "sm": sm,
@@ -972,16 +990,16 @@ def describe(path, sm, policy, suffix=""):
                 "kind_name": e.kind_name,
                 "arch": e.arch,
                 "arch_label": e.arch_label(),
-                "ptx_isa": f"{e.hdr.version_major}.{e.hdr.version_minor}",
+                "ptx_isa": f"{e.hdr.code_version_major}.{e.hdr.code_version_minor}",
                 "header_size": e.hdr.header_size,
-                "payload_size": e.hdr.payload_size,
+                "padded_payload_size": e.hdr.padded_payload_size,
                 "compressed": e.compressed,
                 "compression": ("obf" if e.obfuscated else "zstd" if e.compressed
                                 else "lz4" if e.lz4 else "zlib" if e.zlib
                                 else "-"),
-                "compressed_size": e.hdr.compressed_size,
-                "decompressed_size": e.hdr.decompressed_size,
-                "flags": f"{e.flags:#x}",
+                "payload_size": e.hdr.payload_size,
+                "uncompressed_payload": e.hdr.uncompressed_payload,
+                "bin_info": f"{e.bin_info:#x}",
                 "arch_suffix": e.arch_suffix,
                 "obfuscated": e.obfuscated,
                 "obfuscation_key": e.obfuscation_key,
@@ -1001,18 +1019,18 @@ def print_report(containers):
     for c in containers:
         print(f"== {c['source']}")
         print(f"   container at {c['offset']:#x}, version {c['version']}, "
-              f"header {c['header_size']}, fat_size {c['fat_size']}, "
+              f"header {c['header_size']}, fatbin_size {c['fatbin_size']}, "
               f"{len(c['entries'])} entries, target {c['target']}, "
               f"policy {c['policy']}")
         for n in c.get("container_notes", []):
             print(f"   container note: {n}")
         print(f"   {'#':>2}  {'kind':<9} {'arch':<11} {'payload':>8} "
-              f"{'comp':<5} {'flags':<10} {'sha256':<16} runs")
+              f"{'comp':<5} {'bin_info':<10} {'sha256':<16} runs")
         for e in c["entries"]:
             print(f"   {e['index']:>2}  {e['kind_name']:<9} {e['arch_label']:<11} "
-                  f"{e['payload_size']:>8} "
+                  f"{e['padded_payload_size']:>8} "
                   f"{e['compression']:<5} "
-                  f"{e['flags']:<10} {(e['payload_sha256'] or '')[:16]:<16} "
+                  f"{e['bin_info']:<10} {(e['payload_sha256'] or '')[:16]:<16} "
                   f"{'<== EXECUTES' if e['executes'] else ''}")
             if e["identifier"]:
                 print(f"       identifier: {e['identifier']}")

@@ -353,7 +353,7 @@ as an empty one. The parser reports it as such. Details are in
 ## Two things that are not in the container at all
 
 **The architecture is a name, and the listing drops half of it.** Two bits of
-the entry `flags` field carry the architecture-name suffix, bit 20 for `a` and
+the entry `bin_info` field carry the architecture-name suffix, bit 20 for `a` and
 bit 21 for `f`, and the driver renders the target as `sm_<arch><suffix>`. Those
 are the suffixes `nvcc` exposes as `sm_90a` and `sm_100f`, confirmed by building
 for each target and reading the bits back.
@@ -380,20 +380,22 @@ a function of the file and the host together.
 Selecting the right entry is only half the question. The other half is which
 bytes are that entry, and the container's two size fields do not answer it.
 
-`payload_size` advances the walk and does not bound the read. A PTX payload is
-read to the first NUL however short the declared size is, and an ELF is read to
-the extent its own headers describe, which can be longer or shorter than the
-declared size. The consequence is measurable and blunt: two containers whose
+The padded payload size at entry+0x08, which Stealthium's published struct
+calls `padded_payload_size`, advances the walk and does not bound the read. A
+raw PTX payload is read to the first NUL however short the declared size is, a
+raw ELF is read to the extent its own headers describe, and a compressed entry
+is read as the stream whose length sits in a different field at entry+0x10,
+which still runs when the padded size declares zero. The consequence is measurable and blunt: two containers whose
 declared payload bytes are byte-identical, `sha256 5f9458539df4b732` on both,
 run different kernels on the GPU. A PTX entry declaring **zero** bytes of
-payload runs a complete kernel. A tool hashing `payload[0 : payload_size]`,
+payload runs a complete kernel. A tool hashing `payload[0 : padded_payload_size]`,
 which is the obvious implementation, therefore gives the same hash to different
 code and a different hash to the same code. The collision is in the per-entry
 hash specifically: the two containers differ elsewhere, so a hash over the
 whole container still separates them, and the measurement is in
 `analysis/declared-versus-executed.md`.
 
-`fat_size` bounds the walk, but the driver truncates it to a signed 32-bit
+`fatbin_size` bounds the walk, but the driver truncates it to a signed 32-bit
 value and an entry is walked when its **start** lies inside that bound. So an
 entry whose header and payload lie entirely past the end of the declared
 container executes, one byte of declared size decides whether it does, and

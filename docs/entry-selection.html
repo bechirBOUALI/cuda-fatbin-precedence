@@ -288,7 +288,7 @@
     {tag:"level 2  architecture", zone:"driver", kill:2, t:"Level 2, architecture",
      d:"Among entries of one kind the nearest compatible architecture wins, whatever the file order says. sm_86 would run here, but sm_89 is nearer."},
     {tag:"level 3  flag bit 24", zone:"driver", kill:3, t:"Level 3, flag bit 24",
-     d:"Two cubins now tie on kind and architecture. One bit of the flags field separates them, and the entry without it wins. Nothing else in the container differs."},
+     d:"Two cubins now tie on kind and architecture. One bit of the bin_info flags field separates them, and the entry without it wins. Nothing else in the container differs."},
     {tag:"level 4  file order", zone:"driver", kill:4, t:"Level 4, file order",
      d:"Still tied, so position decides at last. For cubins the first wins. For PTX it is the last, so there is no single positional rule a tool can implement."},
     {tag:"handoff", zone:"gpu", win:true, carrier:true, t:"The winner is loaded",

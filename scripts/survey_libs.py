@@ -41,7 +41,7 @@ def survey_file(path, sm):
             multi += 1
         # Count container-level notes as well as entry-level ones. Counting
         # only the entries would let a container whose own header is the
-        # problem, a truncated fat_size or an entry outside it, pass as clean.
+        # problem, a truncated fatbin_size or an entry outside it, pass as clean.
         if any(e.notes for e in entries) or getattr(hdr, "notes", None):
             notes += 1
         winner = fp.would_execute(entries, sm)

@@ -40,8 +40,8 @@ can be answered without a GPU to answer it on.
 | 10 | Decompression is keyed by flag bits rather than by entry kind, and those bits carry a family: zstd in a default build, LZ4 in one shipped library | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md), [divergence-matrix](analysis/divergence-matrix.md) |
 | 11 | Entry kinds 0x20, 0x80 and 0x100 are `index`, `tile ir` and `contatenated entry`, NVIDIA's own spelling | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
 | 12 | Kind 0x10 is an ELF the driver finalizes before load. **Inference**, not confirmed: NVIDIA names it nowhere | [fatbin-entry-kinds](analysis/fatbin-entry-kinds.md) |
-| 13 | `payload_size` advances the walk but does not bound the read: PTX is read to the first NUL, an ELF to the extent its own headers describe. Two containers declaring byte-identical payloads run different kernels | [declared-versus-executed](analysis/declared-versus-executed.md) |
-| 14 | `fat_size` is truncated to a signed 32-bit value, and an entry is walked when its **start** is inside it, so an entry lying outside the declared container executes | [declared-versus-executed](analysis/declared-versus-executed.md) |
+| 13 | The padded payload size at entry+0x08 advances the walk but does not bound the read: raw PTX is read to the first NUL, a raw ELF to the extent its own headers describe, a compressed entry to its stream length at entry+0x10. Two containers declaring byte-identical payloads run different kernels | [declared-versus-executed](analysis/declared-versus-executed.md) |
+| 14 | `fatbin_size` is truncated to a signed 32-bit value, and an entry is walked when its **start** is inside it, so an entry lying outside the declared container executes | [declared-versus-executed](analysis/declared-versus-executed.md) |
 
 The illustration below shows rows 1 to 3 as the driver applies them, one
 container narrowed to one kernel:
@@ -240,7 +240,7 @@ for each entry, whether the driver would execute it.
 - **It hashes the extent the driver reads**, not the declared payload, which is
   what stops two containers with byte-identical declared bytes from hashing the
   same while running different kernels.
-- **It walks the container the way the driver does**, with `fat_size` truncated
+- **It walks the container the way the driver does**, with `fatbin_size` truncated
   to a signed 32-bit value and an entry counted as present when its start is
   inside, so entries that lie outside the declared container are not missed.
 - **It decompresses on the flag, not the kind**, which is what stops compressed

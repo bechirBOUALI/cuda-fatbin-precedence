@@ -42,7 +42,7 @@ The loop reads the container header exactly as a parser would:
 ```
 47b687:  mov    0x58(%rdx),%rax      ; container base
 47b68b:  movzwl 0x6(%rax),%ebx       ; header_size, u16 at +0x06
-47b68f:  mov    0x8(%rax),%rsi       ; fat_size,    u64 at +0x08
+47b68f:  mov    0x8(%rax),%rsi       ; fatbin_size,    u64 at +0x08
 47b69d:  add    %rax,%r14            ; first entry = base + header_size
 ```
 
@@ -57,7 +57,7 @@ and then walks entries by stride, holding an incumbent in `%r15`:
 47b6e6:  mov    0x4(%r14),%eax       ; entry header_size, +0x04
 47b6ea:  add    0x8(%r14),%rax       ; + payload_size,    +0x08
 47b6ee:  add    %rax,%r14            ; next entry
-47b6fe:  cmp    %rax,%rdx            ; bounded by fat_size
+47b6fe:  cmp    %rax,%rdx            ; bounded by fatbin_size
 47b701:  jge    47b9fa
 47b707:  cmpw   $0x100,(%r14)        ; kind 0x100, the group entry
 ```

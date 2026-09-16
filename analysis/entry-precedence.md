@@ -92,7 +92,7 @@ artefact of testing pairs.
 ### Level 3, flag bit 24
 
 Two cubins that tie on kind and architecture are separated by bit 24 of the
-entry `flags` field, and the entry **without** it wins.
+entry `bin_info` field, and the entry **without** it wins.
 
 | Container | Executed |
 |---|---|
@@ -275,7 +275,7 @@ Two conflict cases were left open when this document was first written: a
 payload hidden in the slack when the declared payload size exceeds the real one,
 and an entry positioned past the declared container size. Both are measured in
 `declared-versus-executed.md`. The short answer is that neither size field is a length:
-`payload_size` advances the walk without bounding the read, so two containers
-declaring byte-identical payloads run different kernels, and `fat_size` is
+`padded_payload_size` advances the walk without bounding the read, so two containers
+declaring byte-identical payloads run different kernels, and `fatbin_size` is
 truncated to a signed 32-bit value and only has to contain an entry's first
 byte, so an entry lying outside the declared container executes.

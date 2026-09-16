@@ -72,7 +72,7 @@ CASES = [
     ("b24_on_first.fatbin",   "ELF A + ELF B, bit 24 on A only",             {}),
     ("b24_on_second.fatbin",  "ELF A + ELF B, bit 24 on B only",             {}),
     # The size fields. payload_size advances the walk without bounding the read,
-    # and fat_size is truncated to int32 and need only contain an entry's start.
+    # and fatbin_size is truncated to int32 and need only contain an entry's start.
     ("ptx_collide_a.fatbin",  "PTX, 200 of 344 bytes declared",              {}),
     ("ptx_collide_b.fatbin",  "same 200 declared bytes, other kernel",       {}),
     ("ptx_declared0.fatbin",  "PTX, 0 bytes declared",                       {}),
@@ -81,10 +81,10 @@ CASES = [
     ("swallow_bit24.fatbin",  "same, over the bit 24 tie-break",             {}),
     ("oob_hidden_entry.fatbin", "entry appended past the declared container",{}),
     ("oob_live_entry.fatbin", "same, one byte more declared",                {}),
-    ("oob_shrink.fatbin",     "fat_size 3176, entry 1 outside",              {}),
-    ("oob_offby1.fatbin",     "fat_size 3177, entry 1 starts inside",        {}),
-    ("trunc_negative.fatbin", "fat_size 0x800018D0, negative as int32",      {}),
-    ("trunc_high.fatbin",     "fat_size 0x100000C68, low 32 bits used",      {}),
+    ("oob_shrink.fatbin",     "fatbin_size 3176, entry 1 outside",              {}),
+    ("oob_offby1.fatbin",     "fatbin_size 3177, entry 1 starts inside",        {}),
+    ("trunc_negative.fatbin", "fatbin_size 0x800018D0, negative as int32",      {}),
+    ("trunc_high.fatbin",     "fatbin_size 0x100000C68, low 32 bits used",      {}),
 
     ("ptxa_elfb.fatbin",      "PTX A + ELF B, CUDA_FORCE_PTX_JIT=1",
      {"CUDA_FORCE_PTX_JIT": "1"}),
