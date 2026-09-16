@@ -192,7 +192,11 @@ behind a literal `// TODO: actually sort by SM`. The rule is not merely
 undocumented, it is unimplemented outside NVIDIA.
 
 Every cell above was measured, the tools built from pinned upstream commits and
-run locally, with the last column read back from the GPU. No evasion of a
+run locally, with the last column read back from the GPU. `tools/fetch.sh`
+clones both upstreams at those pins and builds a thin probe against each
+parser; `tools/run.sh` reproduces the table. Neither probe reimplements any
+parsing, and [tools](tools/README.md) says what each one does and does not
+cover. No evasion of a
 security product is claimed, because no open-source GPU-code security scanner
 was found to test against.
 
@@ -246,6 +250,13 @@ python3 scripts/survey_libs.py       # the same question on shipped libraries
 python3 scripts/fatbin_entry_selection.py build/ptxa_elfb.fatbin
 ```
 
+To reproduce the tool comparison as well, which needs `cargo` and `go`:
+
+```sh
+./tools/fetch.sh                     # clone ZLUDA and the Datadog agent at the pins
+./tools/run.sh                       # every reader over the same containers
+```
+
 Set `CUDA_CACHE_DISABLE=1` for any manual run, or a cached JIT result can be
 mistaken for a fresh selection decision. The matrix script sets it itself.
 
@@ -258,6 +269,7 @@ analysis/           the evidence behind each finding above, size fields included
 scripts/            the selector, the divergence matrix, the library survey
 src/                test kernels and a minimal Driver API loader
 probes/             programs that identify entry kinds via libnvfatbin
+tools/              thin probes over the Datadog and ZLUDA parsers, at pinned commits
 ```
 
 ## Scope

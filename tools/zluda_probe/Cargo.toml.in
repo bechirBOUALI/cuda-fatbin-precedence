@@ -1,0 +1,9 @@
+# Generated into Cargo.toml by ../fetch.sh, which fills in the clone path.
+[package]
+name = "zluda_probe"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+dark_api = { path = "@ZLUDA@/dark_api" }
+cuda_types = { path = "@ZLUDA@/cuda_types" }

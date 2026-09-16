@@ -7,3 +7,10 @@ loader
 leaktest
 __pycache__/
 *.pyc
+tools/upstream/
+tools/zluda_probe/Cargo.toml
+tools/zluda_probe/Cargo.lock
+tools/zluda_probe/target/
+tools/dd_probe/go.mod
+tools/dd_probe/go.sum
+tools/dd_probe/dd_probe
