@@ -379,7 +379,10 @@ declared payload bytes are byte-identical, `sha256 5f9458539df4b732` on both,
 run different kernels on the GPU. A PTX entry declaring **zero** bytes of
 payload runs a complete kernel. A tool hashing `payload[0 : payload_size]`,
 which is the obvious implementation, therefore gives the same hash to different
-code and a different hash to the same code.
+code and a different hash to the same code. The collision is in the per-entry
+hash specifically: the two containers differ elsewhere, so a hash over the
+whole container still separates them, and the measurement is in
+`analysis/size-fields.md`.
 
 `fat_size` bounds the walk, but the driver truncates it to a signed 32-bit
 value and an entry is walked when its **start** lies inside that bound. So an

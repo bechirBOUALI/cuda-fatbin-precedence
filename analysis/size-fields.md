@@ -49,6 +49,14 @@ the GPU runs different code. That is a hash collision produced by metadata
 alone, with no work on the hash function, and it is the sharpest form of the
 gap this repository is about.
 
+The claim is bounded, and the bound is worth stating rather than leaving to be
+found. What collides is the per-entry hash taken over the declared payload. The
+two files differ in the bytes past that payload, so a hash over the whole
+container tells them apart: `e381c0ab1b78` against `7cf18119d50f`. A pipeline
+that hashes the container as well as its entries still sees a difference at the
+container layer. What it cannot do is say which kernel ran, because the entry
+hash it would use to answer that is the one that collides.
+
 The limit case removes the remaining doubt. `ptx_declared0.fatbin` declares a
 payload of **zero** bytes and runs a complete kernel, so a declared-size hasher
 hashes nothing at all while the GPU executes 342 bytes of PTX.

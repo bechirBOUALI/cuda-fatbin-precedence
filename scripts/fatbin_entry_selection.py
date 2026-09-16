@@ -317,16 +317,24 @@ class Entry:
                 cut = text.find(b"\x00")
                 return text if cut < 0 else text[:cut]
             if self.hdr.compressed_size:
-                # A second compression indicator: compressed_size is set while
-                # flag 0x8000 is not. One PTX entry in the shipped libcufile is
-                # stored this way. The scheme is not zstd and is not decoded
-                # here, so the stored bytes stand and the NUL rule below, which
-                # applies to plain text, must not run on them.
+                # A second compression scheme. One PTX entry in the shipped
+                # libcufile carries flags 0x2011, which is bit 13 rather than
+                # the zstd bit 15. Stealthium's published BinInfo enum names
+                # bit 13 LZ4Compression, and bits 12 and 14 ZLIBCompression and
+                # LZ4Compression2, so the flags field carries a compression
+                # family rather than one bit. This parser decodes only zstd, so
+                # the stored bytes stand, and the NUL rule below, which applies
+                # to plain text, must not run on them.
+                scheme = {1 << 12: "zlib", 1 << 13: "LZ4",
+                          1 << 14: "LZ4 (second variant)"}
+                named = next((n for b, n in scheme.items() if self.flags & b),
+                             "an unidentified scheme")
                 self.notes.append(
-                    f"payload is compressed by a scheme this parser does not "
-                    f"decode: compressed_size {self.hdr.compressed_size} is set "
-                    f"while flag 0x8000 is not. The hash covers the stored "
-                    f"bytes, not the device code")
+                    f"payload is compressed by {named}, which this parser does "
+                    f"not decode: compressed_size {self.hdr.compressed_size} is "
+                    f"set while the zstd flag 0x8000 is not. The hash covers "
+                    f"the stored bytes, not the device code. Compression bits "
+                    f"per Stealthium's published BinInfo enum")
                 return self.declared_payload
             cut = blob.find(b"\x00", start, len(blob))
             end = len(blob) if cut < 0 else cut

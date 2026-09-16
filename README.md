@@ -229,8 +229,9 @@ for each entry, whether the driver would execute it.
 
 342 of the 343 shipped containers parse with no structural complaint, so it is
 exercised on real code and not only on its own corpus. The exception is one PTX
-entry in `libcufile` compressed by a scheme this parser does not decode, which
-it reports rather than hashing as though it were code.
+entry in `libcufile` compressed with LZ4 rather than zstd, which this parser
+does not decode and reports rather than hashing as though it were code. The
+compression bits are named in Stealthium's published `BinInfo` enum.
 
 ## Reproducing
 

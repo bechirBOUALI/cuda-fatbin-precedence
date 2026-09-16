@@ -236,9 +236,12 @@ exact-arch both report the cubin.
 
 342 of the 343 containers parsed with no structural complaint, so the parser is
 exercised on real shipped code and not only on its own corpus. The exception is
-one PTX entry in `libcufile` stored with a second compression indicator, a set
-`compressed_size` with flag 0x8000 clear, which this parser does not decode; it
-says so rather than hashing the stored bytes as though they were code.
+one PTX entry in `libcufile` carrying flags `0x2011`, which is bit 13 rather
+than the zstd bit 15. Stealthium's published `BinInfo` enum names bit 13
+`LZ4Compression`, alongside `ZLIBCompression` at bit 12 and a second LZ4 variant
+at bit 14, so the field carries a compression family and not a single bit. This
+parser decodes only zstd, and says so rather than hashing the stored bytes as
+though they were code.
 
 ## A separate question: does anything validate payloads
 
