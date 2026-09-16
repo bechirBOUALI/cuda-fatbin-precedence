@@ -121,7 +121,8 @@ rule is wrong the other way round.
 ## The architecture is declared twice
 
 A cubin entry states its architecture in the fat binary entry header at
-`+0x1c`, and again inside the embedded ELF in `e_flags`. Nothing makes the two
+`+0x1c`, and again inside the embedded ELF in `e_flags`. Field names here are
+mapped to Stealthium's published struct in `declared-versus-executed.md`. Nothing makes the two
 agree.
 
 | Entry header | Embedded ELF | Result |

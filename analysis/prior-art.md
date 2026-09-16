@@ -50,7 +50,11 @@ piece this research started from. On selection it repeats the documented coarse
 rule, "for each GPU, prefer a cubin with matching SM version; fall back to PTX
 if no match exists", and goes no further. Its entry structure names a
 `bin_info` bitfield holding platform, debug and compression bits, and does not
-identify the bits that carry the architecture-name suffix or the tie-break.
+identify the bits that carry the architecture-name suffix or the tie-break. Two
+of the fields it marks undocumented are identified here, `field_24` as the
+identifier length and `field_30` as the obfuscation key, and
+`declared-versus-executed.md` maps every field name in this repository to the
+one in that write-up.
 The authors are explicit that field meanings were inferred by comparing
 binaries and are "by no means a standard".
 

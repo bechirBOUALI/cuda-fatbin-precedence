@@ -16,6 +16,59 @@ They are settled here, by execution.
 | Toolkit | CUDA 13.2 |
 | Method | every container loaded with `CUDA_CACHE_DISABLE=1`, marker read back |
 
+## Field names, against Stealthium's published struct
+
+The format was documented publicly before this work, so the names here are
+mapped to that account rather than invented alongside it. Everything below is
+the same byte at the same offset under two names.
+
+Container header:
+
+| offset | here | Stealthium |
+|---|---|---|
+| 0x00 | `magic` | `magic` |
+| 0x04 | `version` | `version` |
+| 0x06 | `header_size` | `header_size` |
+| 0x08 | `fat_size` | `fatbin_size` |
+
+Entry header:
+
+| offset | here | Stealthium |
+|---|---|---|
+| 0x00 | `kind` | `kind` |
+| 0x04 | `header_size` | `header_size` |
+| 0x08 | `payload_size` | `padded_payload_size` |
+| 0x10 | `compressed_size` | `payload_size` |
+| 0x14 | `opts_desc_offset` | `ptxas_options_offset` |
+| 0x18, 0x1a | `version_minor`, `version_major` | `code_version_minor`, `code_version_major` |
+| 0x1c | `arch` | `arch` |
+| 0x20 | `ident_offset` | `identifier_offset` |
+| 0x24 | `ident_length` | `field_24`, undocumented |
+| 0x28 | `flags` | `bin_info` |
+| 0x30 | `obfuscation_key` | `field_30`, undocumented |
+| 0x38 | `decompressed_size` | `uncompressed_payload` |
+
+Two of those are identifications rather than renamings. `field_24` is the
+length of the identifier string at `identifier_offset`: a container built with
+`fatbinary --ident=IDENTMARKER99` carries 13 there. `field_30` holds the
+obfuscation key, the decimal digits of `fatbinary --okey` read back as hex,
+which `ptx-obfuscation.md` measures.
+
+The naming matters for the finding below, because the two accounts split the
+size fields differently. What advances the walk, and what this document is
+about, is the u64 at 0x08: `payload_size` here, `padded_payload_size` there.
+The i32 at 0x10 is 0 for an uncompressed entry, so for those entries the u64 is
+the only length a reader has. Where the text below says an entry declares 200
+bytes, that is the field at 0x08 under either name.
+
+One name is worth questioning rather than mapping. `fatbin_size` is described
+as the total size of the contained binaries, which is the natural reading and
+the one a parser implements. The driver does not treat it that way: it
+truncates the value to a signed 32-bit quantity and uses it only to bound how
+far the walk advances, so an entry whose start falls inside it is walked even
+when its body lies far outside, and a declared size that covers nothing at all
+is still a valid container to the driver.
+
 ## The two rules
 
 **`payload_size` advances the walk. It does not bound the read.**
