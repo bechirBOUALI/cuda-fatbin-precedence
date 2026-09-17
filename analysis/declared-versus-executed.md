@@ -168,6 +168,18 @@ The limit case removes the remaining doubt. `ptx_declared0.fatbin` declares a
 payload of **zero** bytes and runs a complete kernel, so a declared-size hasher
 hashes nothing at all while the GPU executes 342 bytes of PTX.
 
+The obvious objection is that a container carries a second size field, the u32
+at 0x10, which Stealthium's struct comments as the actual payload size, and
+that a careful reader would use that one instead. It does not help, because it
+is populated only for compressed entries. Every uncompressed entry measured
+here carries zero there: both halves of the collision pair, the zero-declared
+container, a stock single-cubin container, and every raw entry found while
+walking the shipped libraries. A reader keying on 0x10 therefore has no length
+at all for precisely the entries whose payload is read to a NUL, and either
+hashes nothing or falls back to the u64 at 0x08, which is where the collision
+is. The field that is accurate is empty when it matters, and the field that is
+present is not a length.
+
 ## The same field in the other direction
 
 `hidden_cubin.fatbin` widens the declared payload of a valid entry by 3112
