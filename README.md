@@ -24,6 +24,9 @@ architecture and the host policy as arguments rather than assuming the local
 machine. It agrees with the hardware on all 41 measured cases, so the question
 can be answered without a GPU to answer it on.
 
+Everything below was measured on one GPU and one driver, an RTX 2000 Ada on
+597.06. [Scope](#scope) says what that does and does not support.
+
 ## What the driver actually does
 
 | # | Finding | Evidence |
@@ -213,12 +216,10 @@ sm_80 and sm_86, neither an exact match for this GPU, which is what an
 `nvcc -gencode` build emits and what cuBLAS ships. What is constructed is only
 the marker: the two entries carry different kernels behind one symbol, so the
 winner can be read back. The tool reports no kernels at all while the GPU runs
-one. Its filter matches the raw compute capability with no
-compatibility range, so a container with no exact match disappears. ZLUDA's
-source says the rest: it discards every cubin with
-`if file.header.kind != HEADER_KIND_PTX { return; }`, then walks PTX in reverse
-behind a literal `// TODO: actually sort by SM`. The rule is not merely
-undocumented, it is unimplemented outside NVIDIA.
+one, because its filter matches the raw compute capability with no
+compatibility range, so a container with no exact match disappears. Neither
+tool set out to model selection, and neither does;
+[prior-art](analysis/prior-art.md) reads their source on the point.
 
 Every cell above was measured, the tools built from pinned upstream commits and
 run locally, with the last column read back from the GPU. `tools/fetch.sh`
