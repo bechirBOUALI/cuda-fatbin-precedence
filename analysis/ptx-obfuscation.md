@@ -45,11 +45,11 @@ apply it.
 
 Building the same PTX three ways, on this toolkit:
 
-| Build | entry kind | entry flags | payload |
+| Build | entry kind | entry `bin_info` | payload |
 |---|---|---|---|
 | plain | 1 | `0x8011` | zstd, decompresses to readable PTX |
 | `--okey=12345` | 1 | `0x8011` | zstd, still readable PTX; only the key field changes |
-| `--okey=12345 -reorder-obfuscation` | 1 | **`0x18011`** | not a valid zstd frame; 234 bytes differ |
+| `--okey=12345 -reorder-obfuscation` | 1 | **`0x18011`** | not a valid zstd frame; 234 bytes of the file differ from the plain build, 230 of them inside the payload |
 
 So obfuscation is a **flag, not a kind**. The entry stays kind 1, and bit 16
 of the entry `bin_info` field marks it. That is a third distinct use of that
