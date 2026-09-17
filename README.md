@@ -82,14 +82,20 @@ Where to read next:
 The measurements were taken on a laptop GPU, but the same selection code ships
 in NVIDIA's Linux **data center** driver, the branch validated for HGX
 A100/A800, H100 and H800. Confirmed by static comparison against
-`libcuda.so.610.57.04`. What this repository records of that comparison is in
-the analysis documents: the entry kinds agree
-([fatbin-entry-kinds](analysis/fatbin-entry-kinds.md), including the Mercury
-sections behind kind 0x10) and the obfuscation strings sit at the same
-structural place ([ptx-obfuscation](analysis/ptx-obfuscation.md)). The rest of
-the selector was compared in the same pass and looked identical in shape, but
-that binary is not in this repository, so take those parts as reported rather
-than reproducible.
+`libcuda.so.610.57.04`. Four things are checkable by anyone who downloads that
+driver, and this repository records them: the entry kinds agree, including the
+Mercury sections behind kind 0x10
+([fatbin-entry-kinds](analysis/fatbin-entry-kinds.md)); both obfuscation
+strings sit at the same structural place, at file offsets `0x67cbe48` and
+`0x67cbe58` ([ptx-obfuscation](analysis/ptx-obfuscation.md)); the
+architecture-name rendering is present in the same shape, with the format
+string `%s_%d%s` beside `sm` and `compute`; and the TileIR dispatch through
+`libnvidia-tileiras.so` is there.
+
+The flag bit 24 tie-break and the kind cascade were compared in the same pass
+and looked identical, but they were not re-derived at instruction level on that
+build, and the driver itself is not in this repository. Treat those two as
+reported rather than reproduced.
 
 Two limits, stated plainly. Nothing was executed on that driver, since no data
 center hardware was available, so this is static evidence that the code is
