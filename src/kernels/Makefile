@@ -68,8 +68,9 @@ SIXENTRY := $(BUILD)/six_entry.fatbin \
             $(BUILD)/six_entry_b24clear.fatbin
 
 # The size fields decide what the driver reads, and they are not what a reader
-# would assume: payload_size advances the walk without bounding the read, and
-# fat_size is truncated to a signed 32-bit value and only has to contain an
+# would assume: padded_payload_size advances the walk without bounding the
+# read, and fatbin_size is truncated to a signed 32-bit value and only has to
+# contain an
 # entry's START. These containers put both facts on the GPU.
 SIZES := $(BUILD)/ptx_collide_a.fatbin \
          $(BUILD)/ptx_collide_b.fatbin \
@@ -309,8 +310,9 @@ $(BUILD)/ptx_%_raw.fatbin: $(BUILD)/variant_%.ptx
 
 # Two containers whose DECLARED payload bytes are byte-identical and which run
 # different kernels. The driver reads PTX to the first NUL and ignores
-# payload_size, so declaring 200 of 344 bytes leaves the marker constant
-# outside the declared range. A tool hashing payload[0:payload_size] gives both
+# padded_payload_size, so declaring 200 of 344 bytes leaves the marker
+# constant outside the declared range. A tool hashing
+# payload[0:padded_payload_size] gives both
 # files the same hash.
 $(BUILD)/ptx_collide_a.fatbin: $(BUILD)/ptx_a_raw.fatbin
 	python3 $(SIZEPATCH) $< $@ --padded-payload-size 200
@@ -340,7 +342,7 @@ $(BUILD)/swallow_bit24.fatbin: $(BUILD)/b24_on_first.fatbin
 	python3 $(SIZEPATCH) $< $@ --padded-payload-size +3176
 
 # An entry appended past the declared container. The driver walks an entry when
-# its START is inside fat_size, so one extra byte of declared size makes an
+# its START is inside fatbin_size, so one extra byte of declared size makes an
 # entry live whose header and payload lie entirely outside the container.
 $(BUILD)/oob_live_entry.fatbin: $(BUILD)/flag24_elfa.fatbin $(BUILD)/elf_ba.fatbin
 	python3 $(SIZEPATCH) $< $@ --append-entry $(BUILD)/elf_ba.fatbin \
@@ -356,7 +358,7 @@ $(BUILD)/oob_shrink.fatbin: $(BUILD)/b24_on_first.fatbin
 $(BUILD)/oob_offby1.fatbin: $(BUILD)/b24_on_first.fatbin
 	python3 $(SIZEPATCH) $< $@ --fatbin-size 3177
 
-# fat_size is truncated to a signed 32-bit value before it bounds the walk.
+# fatbin_size is truncated to a signed 32-bit value before it bounds the walk.
 # Setting bit 31 makes the driver walk nothing; setting bit 32 makes it walk
 # the low half while a u64 reader sees a container of 4 GB and more.
 $(BUILD)/trunc_negative.fatbin: $(BUILD)/b24_on_first.fatbin

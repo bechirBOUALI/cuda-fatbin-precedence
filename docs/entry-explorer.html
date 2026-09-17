@@ -186,7 +186,7 @@
         <rect x="436" y="26" width="80" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
         <text x="476" y="51" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor" opacity=".7">...</text>
 
-        <text x="60" y="88" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".65">stride = headerSize + payloadSize</text>
+        <text x="60" y="88" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".65">stride = header_size + padded_payload_size</text>
         <line x1="112" y1="76" x2="262" y2="76" stroke="currentColor" stroke-width="1" opacity=".5"/>
         <line x1="112" y1="72" x2="112" y2="80" stroke="currentColor" stroke-width="1" opacity=".5"/>
         <line x1="262" y1="72" x2="262" y2="80" stroke="currentColor" stroke-width="1" opacity=".5"/>
@@ -243,7 +243,7 @@
     <div class="board">
       <div>
         <div class="container-hdr">
-          <span>magic ba55ed50</span><span>headerSize 0x10</span><span id="fatsize">fatSize ...</span>
+          <span>magic ba55ed50</span><span>header_size 0x10</span><span id="fatsize">fatbin_size ...</span>
         </div>
         <div class="entries" id="entries"></div>
         <div class="hostline" style="margin-top:12px">
@@ -398,7 +398,7 @@
     ab.onclick=function(){entries.push(E(2,89));clearPreset();render();};
     add.appendChild(ab); host.appendChild(add);
 
-    document.getElementById("fatsize").textContent="fatSize "+(entries.length*3176)+" bytes";
+    document.getElementById("fatsize").textContent="fatbin_size "+(entries.length*3176)+" bytes";
     document.getElementById("targetname").textContent="target sm_"+TARGET.sm;
 
     var res=document.getElementById("result"), sub=document.getElementById("resultsub");

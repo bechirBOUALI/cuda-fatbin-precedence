@@ -39,8 +39,8 @@ static void report(const char *tag, nvFatbinResult r, nvFatbinHandle h,
     FILE *f = fopen(out, "wb");
     if (f) { fwrite(buf, 1, sz, f); fclose(f); }
 
-    // Container header is 16 bytes: magic u32, version u16, headerSize u16,
-    // fatSize u64. The first entry begins at headerSize, and its kind is the
+    // Container header is 16 bytes: magic u32, version u16, header_size u16,
+    // fatbin_size u64. The first entry begins at header_size, and its kind is the
     // u16 at offset 0 of that entry.
     unsigned short hsize = (unsigned short)(buf[6] | (buf[7] << 8));
     unsigned short kind  = (unsigned short)(buf[hsize] | (buf[hsize + 1] << 8));

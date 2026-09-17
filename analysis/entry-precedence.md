@@ -250,7 +250,7 @@ Counting containers by grepping for the magic is wrong, whatever the grep. It
 counts matching *lines*, and binary data puts many magics on one line; some
 implementations also refuse raw byte patterns and report zero hits when the
 magic sits at offset 0. Walk the headers with a real parser instead: read the
-magic, `headerSize` and `fatSize`, then jump by `headerSize + fatSize`.
+magic, `header_size` and `fatbin_size`, then jump by `header_size + fatbin_size`.
 
 ## Reproduction
 
