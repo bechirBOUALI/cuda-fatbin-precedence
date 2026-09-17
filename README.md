@@ -66,26 +66,30 @@ walkthrough with a pause control, or
 [docs/entry-explorer.html](docs/entry-explorer.html) to edit the entries and
 flag bits yourself and watch the rule decide.
 
+Where to read next:
 
-+ [SELECTION-RULE.md](SELECTION-RULE.md) is the whole argument read end to end.
-+ [declared-versus-executed](analysis/declared-versus-executed.md) is the
-sharpest single result: two containers whose declared payload bytes are
-byte-identical, running different kernels on the GPU.
-+ What was already
-public before this work is set out in [prior-art](analysis/prior-art.md).
-+ The selection path is given as disassembly in
-[driver-selection-logic](analysis/driver-selection-logic.md) and as decompiled
-C in [decompiled-selection](analysis/decompiled-selection.md). 
+- [SELECTION-RULE.md](SELECTION-RULE.md), the whole argument end to end.
+- [declared-versus-executed](analysis/declared-versus-executed.md), the sharpest
+  single result: two containers whose declared payload bytes are byte-identical,
+  running different kernels on the GPU.
+- [prior-art](analysis/prior-art.md), what was already public before this work.
+- [driver-selection-logic](analysis/driver-selection-logic.md) and
+  [decompiled-selection](analysis/decompiled-selection.md), the selection path as
+  disassembly and as decompiled C.
 
 ## This is not only a laptop result
 
 The measurements were taken on a laptop GPU, but the same selection code ships
 in NVIDIA's Linux **data center** driver, the branch validated for HGX
 A100/A800, H100 and H800. Confirmed by static comparison against
-`libcuda.so.610.57.04`: the architecture-name rendering including both suffix
-bits, the flag bit 24 tie-break, the kind cascade, the TileIR dispatch through
-`libnvidia-tileiras.so` and the obfuscation path all appear there in the same
-shape.
+`libcuda.so.610.57.04`. What this repository records of that comparison is in
+the analysis documents: the entry kinds agree
+([fatbin-entry-kinds](analysis/fatbin-entry-kinds.md), including the Mercury
+sections behind kind 0x10) and the obfuscation strings sit at the same
+structural place ([ptx-obfuscation](analysis/ptx-obfuscation.md)). The rest of
+the selector was compared in the same pass and looked identical in shape, but
+that binary is not in this repository, so take those parts as reported rather
+than reproducible.
 
 Two limits, stated plainly. Nothing was executed on that driver, since no data
 center hardware was available, so this is static evidence that the code is
@@ -105,8 +109,9 @@ order, cuBLAS and the whole NPP family, a first-match reading is wrong on
 essentially every container.
 
 Nothing in the container answers that for it, and no tool that reads the file
-does either. `cuobjdump` lists every entry with nothing marking which one the
-driver would run. It reports a different architecture for the same entry through
+does either. `cuobjdump` lists the entries it can see, with nothing
+marking which one the driver would run, and finding 14 below is a container
+where one of the entries it cannot see is the one that runs. It reports a different architecture for the same entry through
 `-lelf` than through `-elf`. And for an obfuscated entry it prints "No PTX file
 found to extract", which reads like an entry with no PTX rather than one whose
 PTX it could not decode. Those are measurements of NVIDIA's own tools.
@@ -187,7 +192,7 @@ from.
 
 | Container, on an sm_89 GPU | `cuobjdump` | Datadog `pkg/gpu/cuda` | ZLUDA | fatbin_entry_selection.py | the GPU ran |
 |---|---|---|---|---|---|
-| sm_80 and sm_86 cubins, stock `nvcc` output | lists both, marks neither | no kernels found | nothing, discards cubins | entry 1 | entry 1 |
+| sm_80 and sm_86 cubins, no exact match, the shape cuBLAS ships | lists both, marks neither | no kernels found | nothing, discards cubins | entry 1 | entry 1 |
 | compute_89 PTX then sm_89 cubin | lists both | entry 1, **correct** | entry 0, the PTX | entry 1 | entry 1 |
 | two compute_89 PTX entries | lists both | no kernels found | entry 1, **correct** | entry 1 | entry 1 |
 
@@ -197,9 +202,12 @@ agree with the driver preferring cubins on row two and fails on row three.
 ZLUDA keeps only PTX and walks it backwards, which happens to match the
 last-PTX-wins rule on row three and fails on row two.
 
-Row one is the one to weigh, because nothing in it is crafted. Two stock
-cubins, the shape cuBLAS actually ships, and the tool reports no kernels at all
-while the GPU runs one. Its filter matches the raw compute capability with no
+Row one is the one to weigh, because its shape is ordinary. Two stock cubins at
+sm_80 and sm_86, neither an exact match for this GPU, which is what an
+`nvcc -gencode` build emits and what cuBLAS ships. What is constructed is only
+the marker: the two entries carry different kernels behind one symbol, so the
+winner can be read back. The tool reports no kernels at all while the GPU runs
+one. Its filter matches the raw compute capability with no
 compatibility range, so a container with no exact match disappears. ZLUDA's
 source says the rest: it discards every cubin with
 `if file.header.kind != HEADER_KIND_PTX { return; }`, then walks PTX in reverse

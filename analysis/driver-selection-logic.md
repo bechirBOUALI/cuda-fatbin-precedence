@@ -55,14 +55,14 @@ and then walks entries by stride, holding an incumbent in `%r15`:
 47b6d3:  test   %al,%al
 47b6d5:  jne    47b810               ; accepted, go and rank it
 47b6e6:  mov    0x4(%r14),%eax       ; entry header_size, +0x04
-47b6ea:  add    0x8(%r14),%rax       ; + payload_size,    +0x08
+47b6ea:  add    0x8(%r14),%rax       ; + padded_payload_size, +0x08
 47b6ee:  add    %rax,%r14            ; next entry
 47b6fe:  cmp    %rax,%rdx            ; bounded by fatbin_size
 47b701:  jge    47b9fa
 47b707:  cmpw   $0x100,(%r14)        ; kind 0x100, the group entry
 ```
 
-Two things worth recording. The stride is `header_size + payload_size` taken
+Two things worth recording. The stride is `header_size + padded_payload_size` taken
 from the entry itself, which is why a precedence-aware parser has to walk the
 same way rather than assume a fixed entry size. And a kind `0x100` entry is
 handled by a nested walk over a table whose offset is read from `entry+0x14`

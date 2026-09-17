@@ -58,10 +58,9 @@ def main():
     ap.add_argument("paths", nargs="*",
                     default=["/usr/local/cuda-13.2/lib64"])
     ap.add_argument("--sm", type=int, default=89)
-    # No size limit by default. An earlier default of 60 MB silently dropped
-    # nine libraries, libcublasLt among them, which alone holds 2617 of the
-    # toolkit's 3516 containers, so the survey described a fraction of the
-    # toolkit while the write-up claimed all of it. Pass --max-bytes to trade
+    # No size limit by default. A cap under half a gigabyte drops libcublasLt,
+    # which alone holds 2617 of the toolkit's 3516 containers, so any capped
+    # run describes a fraction of the toolkit. Pass --max-bytes to trade
     # coverage for speed, and say so if you quote the result.
     ap.add_argument("--max-bytes", type=int, default=0,
                     help="skip files larger than this many bytes; 0, the "

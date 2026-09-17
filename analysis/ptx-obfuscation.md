@@ -70,8 +70,9 @@ The stored value looks at first like BCD, the decimal digits of the key read as
 hex nibbles: `--okey=12345` stores `0x12345`, `--okey=1000000` stores
 `0x1000000`. It is not a deliberate encoding. `fatbinary` parses the option as a
 **32-bit hex value**, which is visible in its own diagnostics, `--okey=DEADBEEF`
-is rejected with "expected a number" and `--okey=305419896` with "32-bit hex
-value (305419896) out of range", so the argument is filtered to decimal digits
+is rejected with "'DEADBEEF': expected a number" and `--okey=4294967296` with
+"32-bit hex value (4294967296) out of range", so the argument is filtered to
+decimal digits
 on the way in and read as hex on the way out. The round trip is what produces
 the digit-preserving pattern, and two inputs settle it:
 

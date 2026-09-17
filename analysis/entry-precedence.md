@@ -222,7 +222,7 @@ which raises the question of whether duplicate same-architecture entries appear
 in ordinary compiler output. They do not. Walking the container headers in
 `.nv_fatbin` gives:
 
-| Artifact | Section | Fatbins | Wrappers | Fat sizes |
+| Artifact | Section size | Fatbins | Wrappers | Fat sizes |
 |---|---|---|---|---|
 | object, kernel only | 3504 B | 1 | 1 | 3488 |
 | object, kernel + main | 3504 B | 1 | 1 | 3488 |

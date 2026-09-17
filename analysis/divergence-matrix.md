@@ -186,10 +186,9 @@ take the host policy as an input, which `would_execute()` does.
 The matrix is built from containers made to conflict, which invites the
 objection that the conflicts are artificial. So here is the same comparison
 against every fat binary in the CUDA toolkit's own shipped libraries, none of
-which were built here. Every library is read, with no size limit: an earlier
-run of this survey capped files at 60 MB, which silently dropped nine libraries
-including cuBLASLt, and the numbers it reported described a seventh of the
-toolkit while the text claimed all of it.
+which were built here. Every library is read, with no size limit, which matters
+more than it sounds: a cap anywhere under half a gigabyte drops cuBLASLt, and
+cuBLASLt alone holds 2617 of the toolkit's 3516 containers.
 
 ```
 library                            cont multi first-match  exact-arch  prefer-PTX  notes

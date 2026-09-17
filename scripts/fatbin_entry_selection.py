@@ -674,8 +674,8 @@ def parse_container(blob, offset=0):
         entries.append(entry)
         if entry.stride == 0:
             entry.notes.append(
-                "zero stride: the driver's walk never advances past this entry, "
-                "and cuModuleLoadData does not return")
+                "zero stride: nothing advances the walk past this entry, so "
+                "parsing stops here and any later entry is unreported")
             break
         over = (pos + entry.stride) - (first + declared)
         if over > 0:

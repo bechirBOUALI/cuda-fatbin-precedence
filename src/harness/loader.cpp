@@ -21,8 +21,8 @@
 #include <vector>
 
 // Every driver call is checked. An unchecked failure here would print a stale
-// buffer and be recorded as a precedence result, which would be worse than a
-// an abort: a silently wrong data point.
+// buffer and be recorded as a precedence result, which would be worse than an
+// abort: a silently wrong data point.
 #define CU_CHECK(call)                                                        \
     do {                                                                      \
         CUresult _e = (call);                                                 \

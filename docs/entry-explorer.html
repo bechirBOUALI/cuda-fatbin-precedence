@@ -162,7 +162,7 @@
   <section>
     <h2>Where the decisive bytes live</h2>
     <figure>
-      <svg viewBox="0 0 760 250" role="img" aria-label="A fat binary container holds a 16-byte header followed by entries; each entry has a 64-byte header carrying kind at offset 0, architecture at 0x1c and flags at 0x28, followed by its payload.">
+      <svg viewBox="0 0 760 250" role="img" aria-label="A fat binary container holds a 16-byte header followed by entries; each entry has a 64-byte header carrying kind at offset 0, architecture at 0x1c and bin_info at 0x28, followed by its payload.">
         <defs>
           <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <polygon points="0,1 9,5 0,9" fill="currentColor"/>
@@ -206,13 +206,13 @@
         <text x="220" y="175" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">u32</text>
 
         <rect x="284" y="150" width="104" height="30" rx="3" fill="none" stroke="#5a7599" stroke-width="2"/>
-        <text x="336" y="163" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">+0x28 flags</text>
+        <text x="336" y="163" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">+0x28 bin_info</text>
         <text x="336" y="175" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">u64</text>
 
         <rect x="400" y="150" width="108" height="30" rx="3" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="3 3" opacity=".6"/>
         <text x="454" y="169" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".6">sizes, ident</text>
 
-        <text x="52" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">flags bits that decide:</text>
+        <text x="52" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="currentColor" opacity=".7">bin_info bits that decide:</text>
         <text x="196" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">16 obfuscated</text>
         <text x="288" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">20 suffix a</text>
         <text x="368" y="200" font-family="JetBrains Mono, monospace" font-size="10" fill="#5a7599">21 suffix f</text>

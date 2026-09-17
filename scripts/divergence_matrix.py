@@ -5,7 +5,8 @@ For every container in the corpus this runs three things and compares them:
 
   * the driver, by loading the container and reading back the marker the kernel
     wrote, which is ground truth for what executed;
-  * two conventional static readings, first-match and prefer-PTX;
+  * three conventional static readings, first-match, exact-arch and
+    prefer-PTX;
   * `fatbin_entry_selection.would_execute`, which implements the driver's own rule.
 
 A row where a static reading disagrees with the driver is a divergence: the
@@ -32,8 +33,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build")
 LOADER = os.path.join(BUILD, "loader")
 
-# The corpus, in the order the rules are argued: controls, then level 3, then
-# level 2, then level 1, then the flag-bit cases. `env` is applied on top of
+# The corpus, in the order the rules are argued: controls, then file order,
+# then architecture, then kind, then the flag-bit cases, then the size fields.
+# `env` is applied on top of
 # the environment for that row only.
 CASES = [
     # Controls: the harness agrees with every reading, so the disagreements
@@ -41,10 +43,10 @@ CASES = [
     ("single_elf_a.fatbin",   "control, one sm_89 ELF",                      {}),
     ("elf_ab.fatbin",         "ELF A + ELF B, both sm_89",                   {}),
     ("elf_ba.fatbin",         "ELF B + ELF A, both sm_89",                   {}),
-    # Level 3, and the direction reverses with the kind.
+    # File order, the bottom level, and its direction reverses with the kind.
     ("ptx_ab.fatbin",         "PTX A + PTX B, both compute_89",              {}),
     ("ptx_ba.fatbin",         "PTX B + PTX A, both compute_89",              {}),
-    # Level 2, architecture proximity, order-independent.
+    # Architecture proximity, order-independent, which outranks file order.
     ("elf89a_elf86b.fatbin",  "sm_89 ELF A + sm_86 ELF B",                   {}),
     ("elf86b_elf89a.fatbin",  "sm_86 ELF B + sm_89 ELF A",                   {}),
     ("elf80a_elf86b.fatbin",  "sm_80 ELF A + sm_86 ELF B, neither exact",    {}),
@@ -54,7 +56,7 @@ CASES = [
     ("single_elf75.fatbin",   "control, one sm_75 ELF, wrong generation",     {}),
     ("elf75a_ptx75b.fatbin",  "sm_75 ELF A + compute_75 PTX B",              {}),
     ("ptx75b_elf75a.fatbin",  "compute_75 PTX B + sm_75 ELF A",              {}),
-    # Level 1, kind, which outranks both of the above.
+    # Kind, which outranks both of the above.
     ("ptxa_elfb.fatbin",      "compute_89 PTX A + sm_89 ELF B",              {}),
     ("elfb_ptxa.fatbin",      "sm_89 ELF B + compute_89 PTX A",              {}),
     ("elf86a_ptx89b.fatbin",  "sm_86 ELF A + compute_89 PTX B",              {}),

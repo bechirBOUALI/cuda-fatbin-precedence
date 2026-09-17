@@ -58,7 +58,7 @@ and the loop advances by a stride it takes from each entry:
 ```c
             group_entry = group_entry_next;
             entry = (uint *)((long)entry + (ulong)entry[1] + *(long *)(entry + 2));
-            // stride = (u32 header_size @ entry+0x04) + (u64 payload_size @ entry+0x08)   VA 0x47b6e6/0x47b6ea
+            // stride = (u32 header_size @ +0x04) + (u64 padded_payload_size @ +0x08)   VA 0x47b6e6/0x47b6ea
           } while ((long)entry - (long)first_entry < (long)(int)fatbin_size);
           // walk until fatbin_size bytes consumed   VA 0x47b6f1/0x47b6fe
           if (incumbent == (uint *)0x0) goto LAB_0057be94;
@@ -67,7 +67,7 @@ and the loop advances by a stride it takes from each entry:
 Three things are worth naming. The container's own header size is a u16 at
 offset 6 and its entry-array size is at offset 8, so a parser that walks the
 same way the driver does reads those two fields and nothing else. The entry
-stride is `header_size + payload_size` read out of the entry itself, which is
+stride is `header_size + padded_payload_size` read out of the entry itself, which is
 why assuming a fixed entry size is wrong. And the loop bound is compared as
 `(long)(int)fatbin_size`, a genuine 32-bit truncation of the container's declared
 size and not a decompiler artifact; the instruction is `movslq %esi,%rax` at
