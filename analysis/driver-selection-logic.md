@@ -278,10 +278,14 @@ Not established: the meaning of policy values other than 2 and 7, though the
 incumbent path at `0x47b819` reads the same field and branches on 1, `0xa` and
 `0xc`, and the ranker adds 3 and 6, so there are at least seven live policies.
 Kinds `0x20` and `0x80` are dispatched by the filter but their semantics are
-unknown. Why bit 24 loses the tie-break rather than winning it, and what the
-identifier field the final comparison uses actually contains. And whether a
-genuine `sm_90a` cubin is a candidate on a cc 9.0 device, which needs hardware
-not available here.
+unknown. What the identifier field the final comparison uses actually contains.
+And whether a genuine `sm_90a` cubin is a candidate on a cc 9.0 device, which
+needs hardware not available here.
+
+Why bit 24 loses the tie-break rather than winning it is no longer open: it is
+answered in `bit24-nominal-arch.md`, which also establishes that the bit is a
+copy of the cubin's ELF `e_flags` bit 1 and that the driver reads it at three
+sites rather than one.
 
 Method: function boundaries from `.eh_frame`, disassembly with objdump, then
 every structural claim re-checked by building containers with known properties

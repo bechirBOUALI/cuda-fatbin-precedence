@@ -34,6 +34,7 @@ Everything below was measured on one GPU and one driver, an RTX 2000 Ada on
 | 1 | Selection is a hierarchy: compatibility filter, then kind, then architecture proximity, then flag bit 24, then file order | [entry-precedence](analysis/entry-precedence.md) |
 | 2 | File order reverses by kind, among entries that tie on everything above it: the **first** cubin wins, the **last** PTX wins | [entry-precedence](analysis/entry-precedence.md) |
 | 3 | Flag bit 24 breaks a cubin tie, and the entry **without** it wins | [entry-precedence](analysis/entry-precedence.md) |
+| 3a | Bit 24 is a copy of the cubin's ELF `e_flags` bit 1, set by `ptxas` from compute capability 100 up, and read at three driver sites: the entry's declared architecture is nominal | [bit24-nominal-arch](analysis/bit24-nominal-arch.md) |
 | 4 | Flag bits 20 and 21 encode the `a` and `f` architecture-name suffix; the driver matches on the rendered name `sm_<arch><suffix>` | [driver-selection-logic](analysis/driver-selection-logic.md) |
 | 5 | Architecture is declared twice; selection reads the entry header, validation reads the embedded ELF, in that order | [entry-precedence](analysis/entry-precedence.md) |
 | 6 | Selection commits: a refused payload does not fall back to a good entry sitting next to it | [entry-precedence](analysis/entry-precedence.md) |

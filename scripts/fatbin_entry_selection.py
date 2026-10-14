@@ -105,9 +105,17 @@ FLAG_ARCH_SUFFIX_F  = 1 << 21
 # Bit 24 loses the ELF-against-ELF tie-break: where two cubins are otherwise
 # equal, the one WITHOUT this bit executes. Read out of the ranker's tail and
 # then measured, by setting it on the first of two same-architecture entries
-# and watching the second one run instead. It is set by the toolkit on targets
-# of compute capability 100 and above.
+# and watching the second one run instead.
+#
+# What it means: fatbinary copies it from bit 1 of the cubin's own ELF e_flags,
+# which ptxas sets for every target from compute capability 100 up. The driver
+# reads it at three sites, admitting such an entry on a finalizability test,
+# ranking it below an identical entry without it, and retargeting it to the
+# running device if it wins. So the architecture the entry declares is nominal.
+# See analysis/bit24-nominal-arch.md. FLAG_NOMINAL_ARCH is the name used in the
+# write-up; the original spelling is kept so existing callers keep working.
 FLAG_DEPRIORITISE   = 1 << 24
+FLAG_NOMINAL_ARCH   = FLAG_DEPRIORITISE
 
 
 class FatBinCWrapper(ctypes.LittleEndianStructure):
