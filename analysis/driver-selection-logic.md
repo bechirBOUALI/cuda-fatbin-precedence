@@ -209,9 +209,12 @@ reading the bits back:
 Setting bit 20 on an sm_89 entry therefore does not hide it behind a flag. It
 makes the entry declare `sm_89a`, a target no GPU reports, so the container has
 no candidate and the load fails
-with `CUDA_ERROR_NO_BINARY_FOR_GPU`. Bit 24, which had looked like an inert
-control, is simply not part of the suffix encoding: it appears on compute
-capability 100 and above regardless of suffix.
+with `CUDA_ERROR_NO_BINARY_FOR_GPU`. The toolchain does not define that target
+either: `nvcc -arch=sm_89a` stops with `nvcc fatal : Unsupported gpu
+architecture 'sm_89a'` on CUDA 13.2, while `sm_90a` and `sm_120a` build, so the
+name bit 20 renders here is one only a patched header can produce. Bit 24,
+which had looked like an inert control, is simply not part of the suffix
+encoding: it appears on compute capability 100 and above regardless of suffix.
 
 The divergence survives the correction, and gets sharper. `cuobjdump` reads the
 bit and reports it in one place but not the other:

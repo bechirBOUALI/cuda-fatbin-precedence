@@ -182,4 +182,6 @@ Also open: what `CAN_FINALIZE_DEBUG` changes; where `state+0xb2` and policies 5
 and `0xb` come from, both of which suppress bit 24 handling; whether any policy
 puts `0x1000000` into the required-flags mask at `state+0x10`, which would make
 the bit a hard admission gate; and whether the data center build behaves the
-same, since `libcuda.so.610.57.04` is not on this machine.
+same: `libcuda.so.610.57.04` has been reverse engineered for the entry kinds and
+the obfuscation strings but never run, and its readers of bit 24 were not
+traced.
