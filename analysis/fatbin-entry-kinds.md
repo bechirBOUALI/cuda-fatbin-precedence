@@ -20,7 +20,7 @@ built with a known input and the kind read back.
 | 0x10 | **none** | `cuobjdump` prints `<unknown kind>`; see below |
 | 0x20 | index | `cuobjdump` switch; `nvFatbinAddIndex` writes it |
 | 0x40 | relocatable ptx | `nvFatbinAddReloc`; `cuobjdump` switch |
-| 0x80 | tile ir | `cuobjdump` switch; `nvFatbinAddTileIR` writes it |
+| 0x80 | tile ir | `nvFatbinAddTileIR` on real Tile IR; `cuobjdump` switch and output; see below |
 | 0x100 | contatenated entry | `cuobjdump` switch; the spelling is NVIDIA's |
 
 The switch is at `0x2a895` onward in the CUDA 13.2 build of `cuobjdump`, and
@@ -41,17 +41,88 @@ entry+0x14.
 
 `nvFatbinAddIndex` writing kind 0x20 is visible directly, `mov $0x20,%ecx` at
 `0xb11f6` in `libnvfatbin.so.13.2.86`. That matches the API shape, since
-`nvFatbinAddIndex` is the only `Add*` function in `nvFatbin.h` with no `arch`
-parameter, and the driver's filter accepts kind 0x20 without reading the
-entry's architecture or flags at all.
+`nvFatbinAddIndex` takes no `arch` parameter and the driver's filter accepts
+kind 0x20 without reading the entry's architecture or flags at all. Three of
+the six `Add*` functions take no `arch`: `nvFatbinAddIndex`,
+`nvFatbinAddReloc` and `nvFatbinAddTileIR`. For Tile IR the architecture is
+carried inside the bytecode instead, as the sample below shows.
 
-Neither `index` nor `tile ir` could be round-tripped into a sample.
-`nvFatbinAddIndex` rejects synthetic input with `NVFATBIN_ERROR_INVALID_INDEX`,
-and its header says plainly "Currently, no method of creating an index file is
-available". `nvFatbinAddTileIR` rejects synthetic input with an internal error,
-and this toolkit will not emit TileIR from a `.cu` source. Both are therefore
-established by name and by the code that writes the constant, not by building
-one.
+`index` could not be round-tripped into a sample. `nvFatbinAddIndex` rejects
+synthetic input with `NVFATBIN_ERROR_INVALID_INDEX`, and its header says plainly
+"Currently, no method of creating an index file is available", so kind 0x20 rests
+on the name and on the code that writes the constant rather than on a built
+container.
+
+`tile ir` does have a sample. The earlier failure was the input, not the API:
+`nvFatbinAddTileIR` rejects a synthetic blob with an internal error, and NVRTC
+will not emit Tile IR from a `.cu` source under any option spelling tried in
+`probes/tile_try.c`. Real Tile IR comes from elsewhere in the toolkit, and the
+call accepts it.
+
+## Kind 0x80, built from real Tile IR
+
+The toolkit ships a Tile IR producer; it is just not reachable from `.cu`
+source. `tileiras`, which identifies itself as the "NVIDIA (R) Cuda Tile IR
+optimizing assembler", takes a tile bytecode file and writes a cubin:
+
+```
+tileiras --gpu-name sm_89 --opt-level 3 -o out.cubin in.bc
+```
+
+`cutile-rs` drives exactly that: its pipeline writes tile bytecode to a
+temporary file and invokes `tileiras` on it, which is where a real payload can
+be obtained. The bytecode carries its own magic, `\x7fTileIR\0`:
+
+```
+00000000: 7f54 696c 6549 5200 0d02 0000 8280 0208  .TileIR.........
+```
+
+Handing 1895 bytes of that bytecode to `nvFatbinAddTileIR` succeeds where the
+synthetic blob failed, and the container returned carries kind 0x80:
+
+```
+input 1895 bytes, first4 7f 54 69 6c
+nvFatbinCreate     -> 0
+nvFatbinAddTileIR  -> 0
+nvFatbinSize       -> 0, 872 bytes
+header_size 0x10, FIRST ENTRY KIND = 0x80
+```
+
+`cuobjdump` reads the same container back under NVIDIA's own name, which
+confirms the switch-table reading against a real sample rather than against a
+constant:
+
+```
+Fatbin tile ir code:
+====================
+arch = sm_80
+code version = [3330,0]
+host = linux
+compile_size = 64bit
+compressed
+identifier = real_tile
+tileIROptions =
+```
+
+Three details from the container itself, entry at 0x10, header 0x60 bytes:
+
+- Flags at entry+0x28 are 0x8015, so bit 0x8000 is set and the payload is
+  zstd-compressed, 1895 bytes in and 755 out. Nothing asked for compression.
+  This is the same point the incidental findings below make for ELF: read the
+  flag, do not infer from the kind.
+- The decompressed size at entry+0x38 is 0x767, which is the 1895 input bytes
+  exactly.
+- The arch reads `sm_80` although the bytecode was produced under `tileiras
+  --gpu-name sm_89`. Since `nvFatbinAddTileIR` has no `arch` parameter, the
+  value comes from the bytecode. Why it is sm_80 was not traced.
+
+Neither Rust framework ships such a container, which is worth stating since
+both were checked for it. Under gdb at `cuModuleLoadData`, `cuda-oxide` hands
+over PTX source text by default and an ELF cubin under `--materialize-cubin`,
+and `cutile-rs` hands over the cubin that `tileiras` produced. Neither builds a
+fat binary at any point, so neither exercises the selection rule. The kind 0x80
+container above is constructed from `cutile-rs`'s intermediate, not shipped by
+it.
 
 ## Kind 0x10 is unnamed
 
@@ -100,8 +171,13 @@ gcc -O1 -o kind_probe probes/kind_probe.c -I/usr/local/cuda-13.2/include \
 LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64 ./kind_probe
 ```
 
-`probes/kind_probe2.c` covers `nvFatbinAddIndex` and `nvFatbinAddTileIR`, the
-two that reject synthetic input, and reports the rejection rather than a kind.
+`probes/kind_probe2.c` covers `nvFatbinAddIndex` and `nvFatbinAddTileIR` on
+synthetic input, and reports the rejection rather than a kind.
+`probes/real_tile.c` takes a tile bytecode file as its argument, adds it with
+`nvFatbinAddTileIR`, writes `real_tile.fatbin` and prints the kind it reads
+back. Capture the bytecode by putting a wrapper ahead of
+`/usr/local/cuda-13.2/bin/tileiras` on `PATH` that copies its `.bc` argument
+aside, then running any `cutile-rs` example.
 
 ## Method
 
