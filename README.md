@@ -3,6 +3,10 @@
 A CUDA fat binary holds several compiled forms of the same GPU code. The driver
 picks exactly one and runs it, by a rule NVIDIA does not publish.
 
+The write-up of this work is
+[The undocumented rules behind CUDA kernel selection](https://machinemodesecurity.ie/undocumented-cuda-kernel-selection/).
+This repository is the evidence behind it.
+
 Watching what ran is a solved problem, and dynamic instrumentation is the right
 tool for it. CUPTI reports the selected payload back to a profiler on live
 hardware, and eBPF probes spanning the CUDA API see containers as they load and
